@@ -55,7 +55,10 @@ export interface ModelPrice {
 export interface UsageDetail {
   timestamp: string;
   source: string;
-  auth_index: number;
+  auth_id?: string;
+  auth_index: string | number;
+  pool_type?: string;
+  plan_type?: string;
   latency_ms?: number;
   tokens: {
     input_tokens: number;
@@ -106,6 +109,14 @@ export type UsageTimeRange = '7h' | '24h' | '7d' | 'all';
 
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
 const MODEL_PRICE_STORAGE_KEY = 'cli-proxy-model-prices-v2';
+// Default model pricing baseline (USD / 1M tokens).
+// Keep this preset intentionally focused on the most commonly used models.
+// Updated on 2026-04-15 for management panel cost estimation defaults.
+const DEFAULT_CODEX_MODEL_PRICES: Record<string, ModelPrice> = Object.freeze({
+  'gpt-5.3-codex': { prompt: 1.75, completion: 14, cache: 0.175 },
+  'gpt-5.2-codex': { prompt: 1.25, completion: 10, cache: 0.125 },
+  'gpt-5.4': { prompt: 1.75, completion: 14, cache: 0.175 },
+});
 const USAGE_ENDPOINT_METHOD_REGEX = /^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\S+)/i;
 const USAGE_TIME_RANGE_MS: Record<Exclude<UsageTimeRange, 'all'>, number> = {
   '7h': 7 * 60 * 60 * 1000,
@@ -115,6 +126,48 @@ const USAGE_TIME_RANGE_MS: Record<Exclude<UsageTimeRange, 'all'>, number> = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const getDetailField = (
+  detailRecord: Record<string, unknown> | null | undefined,
+  keys: readonly string[]
+): unknown => {
+  if (!detailRecord) return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(detailRecord, key)) {
+      const value = detailRecord[key];
+      if (value !== undefined && value !== null) {
+        return value;
+      }
+    }
+  }
+  return undefined;
+};
+
+const toOptionalString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+};
+
+const getDetailAuthIndexRaw = (detailRecord: Record<string, unknown> | null | undefined): unknown =>
+  getDetailField(detailRecord, ['auth_index', 'authIndex', 'AuthIndex']);
+
+const getDetailAuthID = (detailRecord: Record<string, unknown> | null | undefined): string | undefined =>
+  toOptionalString(getDetailField(detailRecord, ['auth_id', 'authId', 'AuthID']));
+
+const getDetailPoolType = (detailRecord: Record<string, unknown> | null | undefined): string | undefined =>
+  toOptionalString(getDetailField(detailRecord, ['pool_type', 'poolType', 'PoolType']));
+
+const getDetailPlanType = (detailRecord: Record<string, unknown> | null | undefined): string | undefined =>
+  toOptionalString(getDetailField(detailRecord, ['plan_type', 'planType', 'PlanType']));
+
+const cloneDefaultCodexPrices = (): Record<string, ModelPrice> =>
+  Object.fromEntries(
+    Object.entries(DEFAULT_CODEX_MODEL_PRICES).map(([model, price]) => [
+      model,
+      { ...price },
+    ])
+  ) as Record<string, ModelPrice>;
 
 const getApisRecord = (usageData: unknown): Record<string, unknown> | null => {
   const usageRecord = isRecord(usageData) ? usageData : null;
@@ -197,6 +250,107 @@ export function filterUsageByTimeRange<T>(
         }
         const timestamp = Date.parse(detailRecord.timestamp);
         if (Number.isNaN(timestamp) || timestamp < windowStart || timestamp > nowMs) {
+          return;
+        }
+
+        filteredDetails.push(detail);
+        modelSummary.totalRequests += 1;
+        if (detailRecord.failed === true) {
+          modelSummary.failureCount += 1;
+        } else {
+          modelSummary.successCount += 1;
+        }
+        modelSummary.totalTokens += extractTotalTokens(detailRecord);
+      });
+
+      if (!filteredDetails.length) {
+        return;
+      }
+
+      filteredModels[modelName] = {
+        ...modelEntry,
+        ...toUsageSummaryFields(modelSummary),
+        details: filteredDetails,
+      };
+      hasModelData = true;
+
+      apiSummary.totalRequests += modelSummary.totalRequests;
+      apiSummary.successCount += modelSummary.successCount;
+      apiSummary.failureCount += modelSummary.failureCount;
+      apiSummary.totalTokens += modelSummary.totalTokens;
+    });
+
+    if (!hasModelData) {
+      return;
+    }
+
+    filteredApis[apiName] = {
+      ...apiEntry,
+      ...toUsageSummaryFields(apiSummary),
+      models: filteredModels,
+    };
+
+    totalSummary.totalRequests += apiSummary.totalRequests;
+    totalSummary.successCount += apiSummary.successCount;
+    totalSummary.failureCount += apiSummary.failureCount;
+    totalSummary.totalTokens += apiSummary.totalTokens;
+  });
+
+  return {
+    ...usageRecord,
+    ...toUsageSummaryFields(totalSummary),
+    apis: filteredApis,
+  } as T;
+}
+
+export function filterUsageByAuthIndexes<T>(
+  usageData: T,
+  authIndexes: Set<string>
+): T {
+  const usageRecord = isRecord(usageData) ? usageData : null;
+  const apis = getApisRecord(usageData);
+  if (!usageRecord || !apis) {
+    return usageData;
+  }
+
+  if (!(authIndexes instanceof Set)) {
+    return usageData;
+  }
+
+  const filteredApis: Record<string, unknown> = {};
+  const totalSummary = createUsageSummary();
+
+  Object.entries(apis).forEach(([apiName, apiEntry]) => {
+    if (!isRecord(apiEntry)) {
+      return;
+    }
+
+    const models = isRecord(apiEntry.models) ? apiEntry.models : null;
+    if (!models) {
+      return;
+    }
+
+    const filteredModels: Record<string, unknown> = {};
+    const apiSummary = createUsageSummary();
+    let hasModelData = false;
+
+    Object.entries(models).forEach(([modelName, modelEntry]) => {
+      if (!isRecord(modelEntry)) {
+        return;
+      }
+
+      const detailsRaw = Array.isArray(modelEntry.details) ? modelEntry.details : [];
+      const modelSummary = createUsageSummary();
+      const filteredDetails: unknown[] = [];
+
+      detailsRaw.forEach((detail) => {
+        const detailRecord = isRecord(detail) ? detail : null;
+        if (!detailRecord) {
+          return;
+        }
+
+        const authIndexKey = normalizeAuthIndex(getDetailAuthIndexRaw(detailRecord));
+        if (!authIndexKey || !authIndexes.has(authIndexKey)) {
           return;
         }
 
@@ -551,7 +705,10 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
         details.push({
           timestamp,
           source: normalizeSource(detailRaw.source),
-          auth_index: detailRaw.auth_index as unknown as number,
+          auth_id: getDetailAuthID(detailRaw),
+          auth_index: getDetailAuthIndexRaw(detailRaw) as UsageDetail['auth_index'],
+          pool_type: getDetailPoolType(detailRaw),
+          plan_type: getDetailPlanType(detailRaw),
           latency_ms: latencyMs ?? undefined,
           tokens: tokensRaw as unknown as UsageDetail['tokens'],
           failed: detailRaw.failed === true,
@@ -624,7 +781,10 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
         details.push({
           timestamp,
           source: normalizeSource(detailRaw.source),
-          auth_index: detailRaw.auth_index as unknown as number,
+          auth_id: getDetailAuthID(detailRaw),
+          auth_index: getDetailAuthIndexRaw(detailRaw) as UsageDetail['auth_index'],
+          pool_type: getDetailPoolType(detailRaw),
+          plan_type: getDetailPlanType(detailRaw),
           latency_ms: latencyMs ?? undefined,
           tokens: tokensRaw as unknown as UsageDetail['tokens'],
           failed: detailRaw.failed === true,
@@ -814,17 +974,19 @@ export function calculateTotalCost(
  * 从 localStorage 加载模型价格
  */
 export function loadModelPrices(): Record<string, ModelPrice> {
+  const defaults = cloneDefaultCodexPrices();
+
   try {
     if (typeof localStorage === 'undefined') {
-      return {};
+      return defaults;
     }
     const raw = localStorage.getItem(MODEL_PRICE_STORAGE_KEY);
     if (!raw) {
-      return {};
+      return defaults;
     }
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) {
-      return {};
+      return defaults;
     }
     const normalized: Record<string, ModelPrice> = {};
     Object.entries(parsed).forEach(([model, price]: [string, unknown]) => {
@@ -857,9 +1019,12 @@ export function loadModelPrices(): Record<string, ModelPrice> {
         cache,
       };
     });
-    return normalized;
+    return {
+      ...defaults,
+      ...normalized,
+    };
   } catch {
-    return {};
+    return defaults;
   }
 }
 
@@ -1619,7 +1784,7 @@ export function computeKeyStats(
       details.forEach((detail) => {
         const detailRecord = isRecord(detail) ? detail : null;
         const source = normalizeUsageSourceId(detailRecord?.source, masker);
-        const authIndexKey = normalizeAuthIndex(detailRecord?.auth_index);
+        const authIndexKey = normalizeAuthIndex(getDetailAuthIndexRaw(detailRecord));
         const isFailed = detailRecord?.failed === true;
 
         if (source) {

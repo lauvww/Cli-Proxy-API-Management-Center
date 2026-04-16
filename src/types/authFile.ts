@@ -22,6 +22,11 @@ export interface AuthFileItem {
   type?: AuthFileType | string;
   provider?: string;
   size?: number;
+  path?: string;
+  fullPath?: string;
+  full_path?: string;
+  absolutePath?: string;
+  absolute_path?: string;
   authIndex?: string | number | null;
   runtimeOnly?: boolean | string;
   disabled?: boolean;
@@ -36,4 +41,6 @@ export interface AuthFileItem {
 export interface AuthFilesResponse {
   files: AuthFileItem[];
   total?: number;
+  current_auth_pool?: string;
+  auth_pool_enabled?: boolean;
 }

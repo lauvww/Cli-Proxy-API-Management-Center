@@ -6,14 +6,16 @@
   align-items: center;
   justify-content: center;
   gap: $spacing-sm;
-  border: 1px solid transparent;
+  border: 1px solid var(--glass-border);
   border-radius: $radius-md;
   padding: 10px 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all $transition-fast;
-  background-color: var(--bg-secondary);
+  background-color: var(--glass-bg-secondary);
   color: var(--text-primary);
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
 
   &.btn-primary {
     background-color: var(--primary-color);
@@ -27,8 +29,8 @@
   }
 
   &.btn-secondary {
-    background-color: var(--bg-tertiary);
-    border-color: var(--border-color);
+    background-color: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+    border-color: var(--glass-border);
     color: var(--text-primary);
 
     &:hover {
@@ -87,12 +89,14 @@
 .input,
 textarea {
   width: 100%;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--glass-border);
   border-radius: $radius-md;
   padding: 10px 12px;
-  background-color: var(--bg-secondary);
+  background-color: var(--glass-bg-secondary);
   color: var(--text-primary);
   transition: border-color $transition-fast, box-shadow $transition-fast;
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
 
   &:focus {
     outline: none;
@@ -119,11 +123,13 @@ textarea {
 }
 
 .card {
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  background-color: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   border-radius: $radius-lg;
   box-shadow: var(--shadow);
   padding: $spacing-lg;
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
 }
 
 .card-header {
@@ -222,9 +228,11 @@ textarea {
   padding: $spacing-md;
   border-radius: $radius-md;
   box-shadow: var(--shadow);
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
+  border: 1px solid var(--floating-border);
+  background: var(--floating-surface);
   color: var(--text-primary);
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -407,9 +415,9 @@ textarea {
 }
 
 .modal {
-  background: var(--bg-primary);
+  background: var(--floating-surface);
   border-radius: $radius-lg;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--floating-border);
   box-shadow: $shadow-lg;
   max-width: 100%;
   max-height: 90vh;
@@ -419,6 +427,8 @@ textarea {
   position: relative;
   // 关闭按钮中心位置: right 12px + 16px = 28px, top 12px + 16px = 28px
   transform-origin: calc(100% - 28px) 28px;
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
 
   &.modal-entering {
     animation: modal-scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -458,8 +468,8 @@ textarea {
   width: 32px;
   height: 32px;
   padding: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--glass-bg-secondary);
+  border: 1px solid var(--glass-border);
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: $radius-full;
@@ -582,7 +592,7 @@ textarea {
   border: 1px dashed var(--border-color);
   border-radius: $radius-lg;
   padding: $spacing-lg;
-  background: var(--bg-secondary);
+  background: var(--glass-bg-secondary);
   display: flex;
   justify-content: space-between;
   gap: $spacing-md;
@@ -651,7 +661,7 @@ textarea {
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
   padding: $spacing-md;
-  background: var(--bg-primary);
+  background: var(--glass-bg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -754,7 +764,7 @@ textarea {
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
   padding: $spacing-md;
-  background: var(--bg-primary);
+  background: var(--glass-bg);
   display: flex;
   flex-direction: column;
   gap: $spacing-xs;
@@ -772,7 +782,7 @@ textarea {
 }
 
 .log-viewer {
-  background: var(--bg-secondary);
+  background: var(--glass-bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
   padding: $spacing-md;

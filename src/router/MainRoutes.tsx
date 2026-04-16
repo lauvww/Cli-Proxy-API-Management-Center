@@ -12,6 +12,7 @@ import { AiProvidersOpenAIEditPage } from '@/pages/AiProvidersOpenAIEditPage';
 import { AiProvidersOpenAIModelsPage } from '@/pages/AiProvidersOpenAIModelsPage';
 import { AiProvidersVertexEditPage } from '@/pages/AiProvidersVertexEditPage';
 import { AuthFilesPage } from '@/pages/AuthFilesPage';
+import { AuthPoolPage } from '@/pages/AuthPoolPage';
 import { AuthFilesOAuthExcludedEditPage } from '@/pages/AuthFilesOAuthExcludedEditPage';
 import { AuthFilesOAuthModelAliasEditPage } from '@/pages/AuthFilesOAuthModelAliasEditPage';
 import { OAuthPage } from '@/pages/OAuthPage';
@@ -70,6 +71,7 @@ const mainRoutes = [
   { path: '/auth-files', element: <AuthFilesPage /> },
   { path: '/auth-files/oauth-excluded', element: <AuthFilesOAuthExcludedEditPage /> },
   { path: '/auth-files/oauth-model-alias', element: <AuthFilesOAuthModelAliasEditPage /> },
+  { path: '/auth-pool', element: <AuthPoolPage /> },
   { path: '/oauth', element: <OAuthPage /> },
   { path: '/quota', element: <QuotaPage /> },
   { path: '/usage', element: <UsagePage /> },

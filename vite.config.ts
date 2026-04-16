@@ -5,6 +5,19 @@ import path from 'path';
 import { execSync } from 'child_process';
 import fs from 'fs';
 
+const managementBuildMarker = '<!-- CLIProxyAPI local management build -->';
+
+function tryGitDescribe(args: string[]): string {
+  try {
+    return execSync(`git ${args.join(' ')}`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
 // Get version from environment, git tag, or package.json
 function getVersion(): string {
   // 1. Environment variable (set by GitHub Actions)
@@ -13,13 +26,11 @@ function getVersion(): string {
   }
 
   // 2. Try git tag
-  try {
-    const gitTag = execSync('git describe --tags --exact-match 2>/dev/null || git describe --tags 2>/dev/null || echo ""', { encoding: 'utf8' }).trim();
-    if (gitTag) {
-      return gitTag;
-    }
-  } catch {
-    // Git not available or no tags
+  const gitTag =
+    tryGitDescribe(['describe', '--tags', '--exact-match']) ||
+    tryGitDescribe(['describe', '--tags']);
+  if (gitTag) {
+    return gitTag;
   }
 
   // 3. Fall back to package.json version
@@ -35,32 +46,45 @@ function getVersion(): string {
   return 'dev';
 }
 
+function managementBuildMarkerPlugin() {
+  return {
+    name: 'management-build-marker',
+    transformIndexHtml(html: string) {
+      if (html.includes(managementBuildMarker)) {
+        return html;
+      }
+      return `${managementBuildMarker}\n${html}`;
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    managementBuildMarkerPlugin(),
     viteSingleFile({
-      removeViteModuleLoader: true
-    })
+      removeViteModuleLoader: true,
+    }),
   ],
   define: {
-    __APP_VERSION__: JSON.stringify(getVersion())
+    __APP_VERSION__: JSON.stringify(getVersion()),
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
-    }
+      '@': path.resolve(__dirname, './src'),
+    },
   },
   css: {
     modules: {
       localsConvention: 'camelCase',
-      generateScopedName: '[name]__[local]___[hash:base64:5]'
+      generateScopedName: '[name]__[local]___[hash:base64:5]',
     },
     preprocessorOptions: {
       scss: {
-        additionalData: `@use "@/styles/variables.scss" as *;`
-      }
-    }
+        additionalData: `@use "@/styles/variables.scss" as *;`,
+      },
+    },
   },
   build: {
     target: 'es2020',
@@ -71,8 +95,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
-        manualChunks: undefined
-      }
-    }
-  }
+        manualChunks: undefined,
+      },
+    },
+  },
 });

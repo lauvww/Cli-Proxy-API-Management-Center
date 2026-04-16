@@ -709,6 +709,87 @@
   line-height: 1.65;
 }
 
+.authPoolComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.authPoolComposerAction {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.authPoolList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.authPoolItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.authPoolSwitch {
+  width: 100%;
+  min-height: 42px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.authPoolSwitchActive {
+  box-shadow: 0 14px 28px -24px color-mix(in srgb, var(--primary-color) 60%, transparent);
+}
+
+.authPoolPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.authPoolMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.authPoolStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  min-height: 22px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--bg-primary) 68%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 18%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.authPoolStrategy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  min-height: 22px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 .sectionIssueBadge {
   display: inline-flex;
   align-items: center;
@@ -913,6 +994,28 @@
 
   .stringListRow {
     align-items: stretch;
+  }
+
+  .authPoolComposerAction {
+    justify-content: stretch;
+  }
+
+  .authPoolItem {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .authPoolComposerAction :global(.btn),
+  .authPoolItem :global(.btn) {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .authPoolPath {
+    text-align: center;
+  }
+
+  .authPoolMeta {
+    justify-content: center;
   }
 }
 

@@ -584,6 +584,9 @@ function getNextDirtyFields(
   if (Object.prototype.hasOwnProperty.call(patch, 'authDir')) {
     updateDirty('authDir', nextValues.authDir === baselineValues.authDir);
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'authPoolEnabled')) {
+    updateDirty('authPoolEnabled', nextValues.authPoolEnabled === baselineValues.authPoolEnabled);
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'apiKeysText')) {
     updateDirty('apiKeysText', nextValues.apiKeysText === baselineValues.apiKeysText);
   }
@@ -816,6 +819,7 @@ export function useVisualConfig() {
               : '',
 
         authDir: typeof parsed['auth-dir'] === 'string' ? parsed['auth-dir'] : '',
+        authPoolEnabled: Boolean(((parsed['auth-pool'] as Record<string, unknown> | undefined)?.enabled)),
         apiKeysText: resolveApiKeysText(parsed),
 
         debug: Boolean(parsed.debug),
@@ -908,6 +912,11 @@ export function useVisualConfig() {
         }
 
         setStringInDoc(doc, ['auth-dir'], values.authDir);
+        if (docHas(doc, ['auth-pool']) || values.authPoolEnabled) {
+          ensureMapInDoc(doc, ['auth-pool']);
+          setBooleanInDoc(doc, ['auth-pool', 'enabled'], values.authPoolEnabled);
+          deleteIfMapEmpty(doc, ['auth-pool']);
+        }
         const apiKeys = values.apiKeysText
           .split('\n')
           .map((key) => key.trim())

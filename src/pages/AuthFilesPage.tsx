@@ -58,7 +58,14 @@ import {
   writePersistedAuthFilesCompactMode,
   type AuthFilesSortMode,
 } from '@/features/authFiles/uiState';
-import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
+import { useAuthStore, useConfigStore, useNotificationStore, useThemeStore } from '@/stores';
+import type { AuthFileItem } from '@/types';
+import {
+  getAuthPoolStateFromConfig,
+  normalizePathForCompare,
+  pathIsWithinScope,
+  resolveAuthPoolDisplayPath,
+} from '@/utils/authPool';
 import styles from './AuthFilesPage.module.scss';
 
 const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
@@ -68,13 +75,48 @@ const BATCH_BAR_HIDDEN_TRANSFORM = 'translateX(-50%) translateY(56px)';
 const DEFAULT_REGULAR_PAGE_SIZE = 9;
 const DEFAULT_COMPACT_PAGE_SIZE = 12;
 
-const escapeWildcardSearchSegment = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeWildcardSearchSegment = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const buildWildcardSearch = (value: string): RegExp | null => {
   if (!value.includes('*')) return null;
   const pattern = value.split('*').map(escapeWildcardSearchSegment).join('.*');
   return new RegExp(pattern, 'i');
+};
+
+type AuthPoolKind = 'plus' | 'free' | 'custom';
+
+const extractAuthDir = (raw: Record<string, unknown> | undefined): string => {
+  if (!raw) return '';
+  const candidates = [raw['auth-dir'], raw.authDir, raw['auth_dir']];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return '';
+};
+
+const resolveAuthPoolKind = (authDir: string): AuthPoolKind => {
+  const normalized = normalizePathForCompare(authDir);
+  if (!normalized) return 'custom';
+  if (/[\\]plus$/i.test(normalized)) return 'plus';
+  if (/[\\]free$/i.test(normalized)) return 'free';
+  return 'custom';
+};
+
+const getAuthFilePathCandidates = (file: AuthFileItem): string[] =>
+  [file.path, file.filePath, file.filepath, file.fullPath, file.absolutePath, file.absolute_path]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+
+const fileBelongsToScopePath = (file: AuthFileItem, scopePath: string): boolean => {
+  if (!scopePath.trim()) return true;
+  const pathCandidates = getAuthFilePathCandidates(file);
+  if (pathCandidates.length === 0) return false;
+
+  return pathCandidates.some((candidate) => pathIsWithinScope(candidate, scopePath));
 };
 
 export function AuthFilesPage() {
@@ -85,6 +127,8 @@ export function AuthFilesPage() {
   const pageTransitionLayer = usePageTransitionLayer();
   const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true;
   const navigate = useNavigate();
+  const config = useConfigStore((state) => state.config);
+  const fetchConfig = useConfigStore((state) => state.fetchConfig);
 
   const [filter, setFilter] = useState<'all' | string>('all');
   const [problemOnly, setProblemOnly] = useState(false);
@@ -108,6 +152,8 @@ export function AuthFilesPage() {
   const { keyStats, usageDetails, loadKeyStats, refreshKeyStats } = useAuthFilesStats();
   const {
     files,
+    currentAuthPool,
+    authPoolEnabled,
     selectedFiles,
     selectionCount,
     loading,
@@ -201,10 +247,7 @@ export function AuthFilesPage() {
       if (typeof persisted.problemOnly === 'boolean') {
         setProblemOnly(persisted.problemOnly);
       }
-      if (
-        typeof persistedCompactMode !== 'boolean' &&
-        typeof persisted.compactMode === 'boolean'
-      ) {
+      if (typeof persistedCompactMode !== 'boolean' && typeof persisted.compactMode === 'boolean') {
         setCompactMode(persisted.compactMode);
       }
       if (typeof persisted.search === 'string') {
@@ -220,11 +263,11 @@ export function AuthFilesPage() {
       const regularPageSize =
         typeof persisted.regularPageSize === 'number' && Number.isFinite(persisted.regularPageSize)
           ? clampCardPageSize(persisted.regularPageSize)
-          : legacyPageSize ?? DEFAULT_REGULAR_PAGE_SIZE;
+          : (legacyPageSize ?? DEFAULT_REGULAR_PAGE_SIZE);
       const compactPageSize =
         typeof persisted.compactPageSize === 'number' && Number.isFinite(persisted.compactPageSize)
           ? clampCardPageSize(persisted.compactPageSize)
-          : legacyPageSize ?? DEFAULT_COMPACT_PAGE_SIZE;
+          : (legacyPageSize ?? DEFAULT_COMPACT_PAGE_SIZE);
       setPageSizeByMode({
         regular: regularPageSize,
         compact: compactPageSize,
@@ -337,6 +380,11 @@ export function AuthFilesPage() {
     loadModelAlias();
   }, [isCurrentLayer, loadFiles, loadKeyStats, loadExcluded, loadModelAlias]);
 
+  useEffect(() => {
+    if (!isCurrentLayer || disableControls) return;
+    void fetchConfig(undefined, true).catch(() => {});
+  }, [disableControls, fetchConfig, isCurrentLayer]);
+
   useInterval(
     () => {
       void refreshKeyStats().catch(() => {});
@@ -346,17 +394,60 @@ export function AuthFilesPage() {
 
   const existingTypes = useMemo(() => {
     const types = new Set<string>(['all']);
-    files.forEach((file) => {
+    const hasPathMetadata = files.some((file) => getAuthFilePathCandidates(file).length > 0);
+    const authPoolState = getAuthPoolStateFromConfig(config);
+    const scopePath =
+      currentAuthPool ||
+      resolveAuthPoolDisplayPath(
+        authPoolState,
+        currentAuthPool || authPoolState.activePath || authPoolState.authDir
+      ) ||
+      extractAuthDir(config?.raw as Record<string, unknown> | undefined);
+    const scopedFiles =
+      scopePath && hasPathMetadata
+        ? files.filter((file) => fileBelongsToScopePath(file, scopePath))
+        : files;
+
+    scopedFiles.forEach((file) => {
       if (file.type) {
         types.add(file.type);
       }
     });
     return Array.from(types);
-  }, [files]);
+  }, [config, currentAuthPool, files]);
+
+  const currentAuthDir = useMemo(
+    () => extractAuthDir(config?.raw as Record<string, unknown> | undefined),
+    [config?.raw]
+  );
+  const authPoolState = useMemo(() => getAuthPoolStateFromConfig(config), [config]);
+  const currentScopePath = useMemo(
+    () =>
+      currentAuthPool ||
+      resolveAuthPoolDisplayPath(
+        authPoolState,
+        currentAuthPool || authPoolState.activePath || authPoolState.authDir
+      ) ||
+      currentAuthDir,
+    [authPoolState, currentAuthDir, currentAuthPool]
+  );
+  const currentPoolKind = useMemo(() => resolveAuthPoolKind(currentScopePath), [currentScopePath]);
+  const poolKindLabel = useMemo(() => {
+    if (currentPoolKind === 'plus') return t('auth_files.pool_scope_plus');
+    if (currentPoolKind === 'free') return t('auth_files.pool_scope_free');
+    return t('auth_files.pool_scope_custom');
+  }, [currentPoolKind, t]);
+  const poolScopedFiles = useMemo(() => {
+    const hasPathMetadata = files.some((file) => getAuthFilePathCandidates(file).length > 0);
+    if (!currentScopePath) return files;
+    if (!hasPathMetadata) return files;
+    return files.filter((file) => fileBelongsToScopePath(file, currentScopePath));
+  }, [currentScopePath, files]);
+  const scopeModeEnabled = authPoolEnabled || authPoolState.enabled;
 
   const filesMatchingProblemFilter = useMemo(
-    () => (problemOnly ? files.filter(hasAuthFileStatusMessage) : files),
-    [files, problemOnly]
+    () => (problemOnly ? poolScopedFiles.filter(hasAuthFileStatusMessage) : poolScopedFiles),
+    [poolScopedFiles, problemOnly]
   );
 
   const sortOptions = useMemo(
@@ -630,7 +721,9 @@ export function AuthFilesPage() {
   const titleNode = (
     <div className={styles.titleWrapper}>
       <span>{t('auth_files.title_section')}</span>
-      {files.length > 0 && <span className={styles.countBadge}>{files.length}</span>}
+      {poolScopedFiles.length > 0 && (
+        <span className={styles.countBadge}>{poolScopedFiles.length}</span>
+      )}
     </div>
   );
 
@@ -647,6 +740,17 @@ export function AuthFilesPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>{t('auth_files.title')}</h1>
         <p className={styles.description}>{t('auth_files.description')}</p>
+        {currentScopePath ? (
+          <div className={styles.poolScope}>
+            <span className={styles.poolScopeLabel}>
+              {scopeModeEnabled
+                ? t('auth_files.pool_scope_label')
+                : t('auth_files.pool_scope_fallback_label')}
+            </span>
+            <span className={styles.poolScopeBadge}>{poolKindLabel}</span>
+            <span className={styles.poolScopePath}>{currentScopePath}</span>
+          </div>
+        ) : null}
       </div>
 
       <Card

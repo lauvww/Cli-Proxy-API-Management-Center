@@ -10,9 +10,40 @@
 @use './layout.scss';
 
 body {
-  background-color: var(--bg-secondary);
+  background-color: transparent;
   color: var(--text-primary);
   transition: background-color $transition-normal, color $transition-normal;
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+}
+
+html {
+  background-color: #2d1c10;
+}
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+body::before {
+  z-index: -2;
+  background: url('../assets/background.webp') center / cover no-repeat;
+  transform: scale(1.06);
+  transform-origin: center;
+  filter: saturate(1.12) contrast(1.14) brightness(1.04);
+}
+
+body::after {
+  z-index: -1;
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 186, 108, 0.18), transparent 42%),
+    radial-gradient(circle at 84% 20%, rgba(255, 132, 68, 0.12), transparent 36%),
+    linear-gradient(155deg, var(--global-bg-overlay-start), var(--global-bg-overlay-end));
 }
 
 html.modal-open,

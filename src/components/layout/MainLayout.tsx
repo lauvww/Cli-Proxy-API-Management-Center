@@ -16,6 +16,7 @@ import {
   IconSidebarAuthFiles,
   IconSidebarConfig,
   IconSidebarDashboard,
+  IconKey,
   IconSidebarLogs,
   IconSidebarOauth,
   IconSidebarProviders,
@@ -40,6 +41,7 @@ const sidebarIcons: Record<string, ReactNode> = {
   dashboard: <IconSidebarDashboard size={18} />,
   aiProviders: <IconSidebarProviders size={18} />,
   authFiles: <IconSidebarAuthFiles size={18} />,
+  authPool: <IconKey size={18} />,
   oauth: <IconSidebarOauth size={18} />,
   quota: <IconSidebarQuota size={18} />,
   usage: <IconSidebarUsage size={18} />,
@@ -418,9 +420,14 @@ export function MainLayout() {
           ? 'error'
           : 'muted';
 
+  const authPoolEnabled = config?.authPool?.enabled === true;
+
   const navItems = [
     { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
     { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
+    ...(authPoolEnabled
+      ? [{ path: '/auth-pool', label: t('nav.auth_pool'), icon: sidebarIcons.authPool }]
+      : []),
     { path: '/ai-providers', label: t('nav.ai_providers'), icon: sidebarIcons.aiProviders },
     { path: '/auth-files', label: t('nav.auth_files'), icon: sidebarIcons.authFiles },
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
@@ -449,6 +456,12 @@ export function MainLayout() {
         if (normalizedPath.startsWith('/ai-providers/openai')) return aiProvidersIndex + 0.6;
         return aiProvidersIndex + 0.05;
       }
+    }
+
+    const authPoolIndex = navOrder.indexOf('/auth-pool');
+    if (authPoolIndex !== -1) {
+      if (normalizedPath === '/auth-pool') return authPoolIndex;
+      if (normalizedPath.startsWith('/auth-pool/')) return authPoolIndex + 0.05;
     }
 
     const authFilesIndex = navOrder.indexOf('/auth-files');

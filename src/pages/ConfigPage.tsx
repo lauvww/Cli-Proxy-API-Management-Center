@@ -19,6 +19,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useVisualConfig } from '@/hooks/useVisualConfig';
 import { useNotificationStore, useAuthStore, useThemeStore, useConfigStore } from '@/stores';
 import { configFileApi } from '@/services/api/configFile';
+import { authPoolApi } from '@/services/api/authPool';
 import styles from './ConfigPage.module.scss';
 
 type ConfigEditorTab = 'visual' | 'source';
@@ -457,6 +458,68 @@ export function ConfigPage() {
     });
   }, [isDirty, loadConfig, showConfirmation, t]);
 
+  const handleVisualValuesChange = useCallback(
+    async (patch: Partial<typeof visualValues>) => {
+      if (
+        Object.prototype.hasOwnProperty.call(patch, 'authPoolEnabled') &&
+        Object.keys(patch).length === 1
+      ) {
+        const nextEnabled = patch.authPoolEnabled === true;
+        if (nextEnabled === visualValues.authPoolEnabled) {
+          return;
+        }
+        if (isDirty) {
+          showNotification(t('config_management.auth_pool_toggle_requires_clean_state'), 'warning');
+          return;
+        }
+
+        setSaving(true);
+        try {
+          await authPoolApi.setEnabled(nextEnabled);
+          await loadConfig();
+          try {
+            useConfigStore.getState().clearCache();
+            await useConfigStore.getState().fetchConfig(undefined, true);
+          } catch (refreshError: unknown) {
+            const message =
+              refreshError instanceof Error
+                ? refreshError.message
+                : typeof refreshError === 'string'
+                  ? refreshError
+                  : '';
+            showNotification(
+              `${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`,
+              'error'
+            );
+          }
+          showNotification(
+            t(
+              nextEnabled
+                ? 'auth_pool.notifications.mode_saved'
+                : 'auth_pool.notifications.mode_disabled'
+            ),
+            'success'
+          );
+          if (nextEnabled) {
+            showNotification(
+              t('config_management.visual.sections.auth.auth_pool_page_hint'),
+              'info'
+            );
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : t('notification.save_failed');
+          showNotification(`${t('notification.save_failed')}: ${message}`, 'error');
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+
+      setVisualValues(patch);
+    },
+    [isDirty, loadConfig, setVisualValues, showNotification, t, visualValues.authPoolEnabled]
+  );
+
   const floatingActions = (
     <div className={styles.floatingActionContainer} ref={floatingActionsRef}>
       <div className={styles.floatingActionList}>
@@ -556,7 +619,7 @@ export function ConfigPage() {
               validationErrors={visualValidationErrors}
               hasPayloadValidationErrors={visualHasPayloadValidationErrors}
               disabled={disableControls || loading}
-              onChange={setVisualValues}
+              onChange={handleVisualValuesChange}
             />
           ) : (
             <div className={styles.sourceWorkspace}>

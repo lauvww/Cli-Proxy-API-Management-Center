@@ -1,0 +1,193 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.titleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.description {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 16px;
+}
+
+@media (max-width: 1024px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cardSection {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.summaryPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border-primary);
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+}
+
+.summaryRow,
+.pathRow,
+.fileItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .summaryRow,
+  .pathRow,
+  .fileItem {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.summaryCopy,
+.pathCopy,
+.fileCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.help,
+.value,
+.empty,
+.info,
+.fileMeta {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.value,
+.pathValue,
+.fileName {
+  word-break: break-all;
+}
+
+.pathValue,
+.fileName {
+  font-weight: 600;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.addRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+@media (max-width: 640px) {
+  .addRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pathList,
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pathItem,
+.fileItem {
+  border: 1px solid var(--border-primary);
+  border-radius: 16px;
+  padding: 14px;
+  background: var(--bg-secondary);
+}
+
+.pathItemActive {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.badgeActive {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  color: var(--accent-primary);
+}
+
+.searchRow {
+  display: grid;
+  grid-template-columns: minmax(0, 420px);
+}
+
+.error {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  line-height: 1.6;
+}

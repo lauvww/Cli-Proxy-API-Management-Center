@@ -38,6 +38,13 @@
   flex-wrap: wrap;
 }
 
+.poolFilterGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .timeRangeLabel {
   font-size: 12px;
   color: var(--text-secondary);
@@ -46,6 +53,126 @@
 
 .timeRangeSelectControl {
   min-width: 164px;
+}
+
+.poolFilterSelectControl {
+  min-width: 176px;
+}
+
+.poolQuickPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: $radius-md;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-secondary) 80%, transparent),
+      color-mix(in srgb, var(--bg-primary) 88%, transparent)
+    );
+}
+
+.poolQuickHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.poolQuickLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.poolQuickCurrent {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: $radius-full;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+  max-width: min(100%, 380px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.poolQuickButtons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.poolQuickButton {
+  min-height: 30px;
+  max-width: min(100%, 260px);
+  padding: 0 12px;
+  border-radius: $radius-full;
+  border: 1px solid color-mix(in srgb, var(--border-color) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--primary-color) 40%, var(--border-color));
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--primary-color) 58%, transparent);
+    outline-offset: 1px;
+  }
+}
+
+.poolQuickButtonActive {
+  border-color: color-mix(in srgb, var(--primary-color) 58%, transparent);
+  background: color-mix(in srgb, var(--primary-color) 20%, transparent);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.poolQuickButtonText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.poolScopeHint {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: $radius-md;
+  border: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 52%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.poolScopeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: $radius-full;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 45%, transparent);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  color: var(--text-primary);
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .pageTitle {

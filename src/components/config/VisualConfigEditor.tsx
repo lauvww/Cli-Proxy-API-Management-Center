@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer';
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
@@ -27,6 +28,7 @@ import {
   type IconProps,
 } from '@/components/ui/icons';
 import { ConfigSection } from '@/components/config/ConfigSection';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import type {
   PayloadFilterRule,
@@ -170,6 +172,41 @@ function FieldShell({
   );
 }
 
+const AUTH_DIR_PRESETS_STORAGE_KEY = 'config-management:auth-dir-presets';
+const AUTH_DIR_PRESETS_LIMIT = 20;
+
+function normalizeAuthDirPath(value: string): string {
+  const trimmed = value.trim();
+  const withoutTrailingSeparators = trimmed.replace(/[\\/]+$/, '');
+  if (/^[a-zA-Z]:$/.test(withoutTrailingSeparators)) {
+    return `${withoutTrailingSeparators.toLowerCase()}\\`;
+  }
+  return (withoutTrailingSeparators || trimmed).toLowerCase();
+}
+
+function buildDefaultAuthDirPresets(authDir: string): string[] {
+  const trimmed = authDir.trim();
+  if (!trimmed) return [];
+
+  const withoutTrailingSeparators = trimmed.replace(/[\\/]+$/, '');
+  if (!withoutTrailingSeparators) return [];
+
+  let basePath = withoutTrailingSeparators;
+  if (/[\\/](plus|free)$/i.test(withoutTrailingSeparators)) {
+    const segmentIndex = Math.max(
+      withoutTrailingSeparators.lastIndexOf('\\'),
+      withoutTrailingSeparators.lastIndexOf('/')
+    );
+    if (segmentIndex <= 0) return [];
+    basePath = withoutTrailingSeparators.slice(0, segmentIndex);
+  }
+
+  if (!basePath) return [];
+
+  const pathSeparator = basePath.includes('\\') ? '\\' : '/';
+  return [`${basePath}${pathSeparator}Plus`, `${basePath}${pathSeparator}Free`];
+}
+
 export function VisualConfigEditor({
   values,
   validationErrors,
@@ -192,6 +229,12 @@ export function VisualConfigEditor({
   const nonstreamKeepaliveHintId = `${nonstreamKeepaliveInputId}-hint`;
   const nonstreamKeepaliveErrorId = `${nonstreamKeepaliveInputId}-error`;
   const [activeSectionId, setActiveSectionId] = useState<VisualSectionId>('server');
+  const [authDirPresetDraft, setAuthDirPresetDraft] = useState('');
+  const [authDirPresets, setAuthDirPresets] = useLocalStorage<string[]>(
+    AUTH_DIR_PRESETS_STORAGE_KEY,
+    []
+  );
+  const hasInitializedAuthDirPresetsRef = useRef(false);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const sidebarAnchorRef = useRef<HTMLElement | null>(null);
   const floatingSidebarRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +249,43 @@ export function VisualConfigEditor({
   const isNonstreamKeepaliveDisabled =
     values.streaming.nonstreamKeepaliveInterval === '' ||
     values.streaming.nonstreamKeepaliveInterval === '0';
+  const authDirPresetItems = useMemo(() => {
+    const seen = new Set<string>();
+    const next: string[] = [];
+
+    for (const item of authDirPresets) {
+      if (typeof item !== 'string') continue;
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+
+      const normalized = normalizeAuthDirPath(trimmed);
+      if (seen.has(normalized)) continue;
+
+      seen.add(normalized);
+      next.push(trimmed);
+      if (next.length >= AUTH_DIR_PRESETS_LIMIT) break;
+    }
+
+    return next;
+  }, [authDirPresets]);
+  const activeAuthDirKey = useMemo(() => normalizeAuthDirPath(values.authDir), [values.authDir]);
+  const nextAuthDirPresetCandidate = authDirPresetDraft.trim() || values.authDir.trim();
+
+  useEffect(() => {
+    if (values.authPoolEnabled) return;
+    if (hasInitializedAuthDirPresetsRef.current) return;
+
+    if (authDirPresetItems.length > 0) {
+      hasInitializedAuthDirPresetsRef.current = true;
+      return;
+    }
+
+    const defaults = buildDefaultAuthDirPresets(values.authDir);
+    if (defaults.length === 0) return;
+
+    setAuthDirPresets(defaults);
+    hasInitializedAuthDirPresetsRef.current = true;
+  }, [authDirPresetItems.length, setAuthDirPresets, values.authDir, values.authPoolEnabled]);
 
   const portError = getValidationMessage(t, validationErrors?.port);
   const logsMaxSizeError = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb);
@@ -244,6 +324,44 @@ export function VisualConfigEditor({
   );
   const handlePayloadFilterRulesChange = useCallback(
     (payloadFilterRules: PayloadFilterRule[]) => onChange({ payloadFilterRules }),
+    [onChange]
+  );
+  const handleSaveAuthDirPreset = useCallback(() => {
+    const candidate = nextAuthDirPresetCandidate;
+    if (!candidate) return;
+
+    const candidateKey = normalizeAuthDirPath(candidate);
+    const merged = [
+      candidate,
+      ...authDirPresetItems.filter((item) => normalizeAuthDirPath(item) !== candidateKey),
+    ];
+
+    setAuthDirPresets(merged.slice(0, AUTH_DIR_PRESETS_LIMIT));
+    setAuthDirPresetDraft('');
+  }, [authDirPresetItems, nextAuthDirPresetCandidate, setAuthDirPresets]);
+  const handleApplyAuthDirPreset = useCallback(
+    (preset: string) => {
+      onChange({ authDir: preset });
+    },
+    [onChange]
+  );
+  const handleRemoveAuthDirPreset = useCallback(
+    (preset: string) => {
+      const targetKey = normalizeAuthDirPath(preset);
+      setAuthDirPresets(
+        authDirPresetItems.filter((item) => normalizeAuthDirPath(item) !== targetKey)
+      );
+    },
+    [authDirPresetItems, setAuthDirPresets]
+  );
+  const isAuthDirPresetActive = useCallback(
+    (preset: string) => normalizeAuthDirPath(preset) === activeAuthDirKey,
+    [activeAuthDirKey]
+  );
+  const handleRoutingStrategyChange = useCallback(
+    (nextValue: VisualConfigValues['routingStrategy']) => {
+      onChange({ routingStrategy: nextValue });
+    },
     [onChange]
   );
 
@@ -440,7 +558,8 @@ export function VisualConfigEditor({
         220
       );
       const maxHeight = Math.max(window.innerHeight - top - viewportPadding, 160);
-      const isVisible = workspaceRect.bottom > stickyTop + 24 && anchorRect.top < window.innerHeight;
+      const isVisible =
+        workspaceRect.bottom > stickyTop + 24 && anchorRect.top < window.innerHeight;
 
       floatingElement.style.transform = `translate3d(${left}px, ${top}px, 0)`;
       floatingElement.style.width = `${width}px`;
@@ -738,14 +857,103 @@ export function VisualConfigEditor({
             description={t('config_management.visual.sections.auth.description')}
           >
             <SectionStack>
+              <ToggleRow
+                title={t('config_management.visual.sections.auth.auth_pool_mode')}
+                description={t('config_management.visual.sections.auth.auth_pool_mode_desc')}
+                checked={values.authPoolEnabled}
+                disabled={disabled}
+                onChange={(authPoolEnabled) => onChange({ authPoolEnabled })}
+              />
               <Input
                 label={t('config_management.visual.sections.auth.auth_dir')}
                 placeholder="~/.cli-proxy-api"
                 value={values.authDir}
                 onChange={(e) => onChange({ authDir: e.target.value })}
-                disabled={disabled}
-                hint={t('config_management.visual.sections.auth.auth_dir_hint')}
+                disabled={disabled || values.authPoolEnabled}
+                hint={
+                  values.authPoolEnabled
+                    ? t('config_management.visual.sections.auth.auth_dir_managed_hint')
+                    : t('config_management.visual.sections.auth.auth_dir_hint')
+                }
               />
+              {values.authPoolEnabled ? (
+                <div className={styles.emptyState}>
+                  {t('config_management.visual.sections.auth.auth_pool_page_hint')}
+                </div>
+              ) : (
+                <SectionSubsection
+                  title={t('config_management.visual.sections.auth.auth_pool_title')}
+                  description={t('config_management.visual.sections.auth.auth_pool_desc')}
+                >
+                  <div className={styles.authPoolComposer}>
+                    <Input
+                      label={t('config_management.visual.sections.auth.auth_pool_input')}
+                      placeholder={t(
+                        'config_management.visual.sections.auth.auth_pool_placeholder'
+                      )}
+                      value={authDirPresetDraft}
+                      onChange={(e) => setAuthDirPresetDraft(e.target.value)}
+                      disabled={disabled}
+                      hint={t('config_management.visual.sections.auth.auth_pool_hint')}
+                    />
+                    <div className={styles.authPoolComposerAction}>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={disabled || !nextAuthDirPresetCandidate}
+                        onClick={handleSaveAuthDirPreset}
+                      >
+                        {t('config_management.visual.sections.auth.auth_pool_add')}
+                      </Button>
+                    </div>
+                  </div>
+                  {authDirPresetItems.length > 0 ? (
+                    <div className={styles.authPoolList}>
+                      {authDirPresetItems.map((preset) => {
+                        const isActive = isAuthDirPresetActive(preset);
+
+                        return (
+                          <div key={preset} className={styles.authPoolItem}>
+                            <Button
+                              type="button"
+                              variant={isActive ? 'primary' : 'ghost'}
+                              size="sm"
+                              className={`${styles.authPoolSwitch} ${
+                                isActive ? styles.authPoolSwitchActive : ''
+                              }`}
+                              disabled={disabled}
+                              onClick={() => handleApplyAuthDirPreset(preset)}
+                            >
+                              <span className={styles.authPoolPath}>{preset}</span>
+                              <span className={styles.authPoolMeta}>
+                                {isActive ? (
+                                  <span className={styles.authPoolStatus}>
+                                    {t('config_management.visual.sections.auth.auth_pool_active')}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={disabled}
+                              onClick={() => handleRemoveAuthDirPreset(preset)}
+                            >
+                              {t('config_management.visual.sections.auth.auth_pool_remove')}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className={styles.emptyState}>
+                      {t('config_management.visual.sections.auth.auth_pool_empty')}
+                    </div>
+                  )}
+                </SectionSubsection>
+              )}
               <div className={styles.subsection}>
                 <ApiKeysCardEditor
                   value={values.apiKeysText}
@@ -862,7 +1070,13 @@ export function VisualConfigEditor({
                 <FieldShell
                   label={t('config_management.visual.sections.network.routing_strategy')}
                   labelId={routingStrategyLabelId}
-                  hint={t('config_management.visual.sections.network.routing_strategy_hint')}
+                  hint={
+                    values.authPoolEnabled
+                      ? t(
+                          'config_management.visual.sections.network.routing_strategy_managed_by_auth_pool'
+                        )
+                      : t('config_management.visual.sections.network.routing_strategy_hint')
+                  }
                   hintId={routingStrategyHintId}
                 >
                   <Select
@@ -878,13 +1092,13 @@ export function VisualConfigEditor({
                       },
                     ]}
                     id={`${routingStrategyLabelId}-select`}
-                    disabled={disabled}
+                    disabled={disabled || values.authPoolEnabled}
                     ariaLabelledBy={routingStrategyLabelId}
                     ariaDescribedBy={routingStrategyHintId}
                     onChange={(nextValue) =>
-                      onChange({
-                        routingStrategy: nextValue as VisualConfigValues['routingStrategy'],
-                      })
+                      handleRoutingStrategyChange(
+                        nextValue as VisualConfigValues['routingStrategy']
+                      )
                     }
                   />
                 </FieldShell>
@@ -938,9 +1152,7 @@ export function VisualConfigEditor({
               />
               <ToggleRow
                 title={t('config_management.visual.sections.quota.antigravity_credits')}
-                description={t(
-                  'config_management.visual.sections.quota.antigravity_credits_desc'
-                )}
+                description={t('config_management.visual.sections.quota.antigravity_credits_desc')}
                 checked={values.quotaAntigravityCredits}
                 disabled={disabled}
                 onChange={(quotaAntigravityCredits) => onChange({ quotaAntigravityCredits })}

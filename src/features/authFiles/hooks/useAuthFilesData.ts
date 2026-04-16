@@ -22,6 +22,8 @@ type DeleteAllOptions = {
 
 export type UseAuthFilesDataResult = {
   files: AuthFileItem[];
+  currentAuthPool: string;
+  authPoolEnabled: boolean;
   selectedFiles: Set<string>;
   selectionCount: number;
   loading: boolean;
@@ -58,6 +60,8 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
   const { showNotification, showConfirmation } = useNotificationStore();
 
   const [files, setFiles] = useState<AuthFileItem[]>([]);
+  const [currentAuthPool, setCurrentAuthPool] = useState('');
+  const [authPoolEnabled, setAuthPoolEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -118,13 +122,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
   }, []);
 
   const applyDeletedFiles = useCallback((names: string[]) => {
-    const deletedNames = Array.from(
-      new Set(
-        names
-          .map((name) => name.trim())
-          .filter(Boolean)
-      )
-    );
+    const deletedNames = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
     if (deletedNames.length === 0) return;
 
     const deletedSet = new Set(deletedNames);
@@ -167,6 +165,10 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
     try {
       const data = await authFilesApi.list();
       setFiles(data?.files || []);
+      setCurrentAuthPool(
+        typeof data?.current_auth_pool === 'string' ? data.current_auth_pool.trim() : ''
+      );
+      setAuthPoolEnabled(data?.auth_pool_enabled === true);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : t('notification.refresh_failed');
       setError(errorMessage);
@@ -232,9 +234,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
         }
 
         if (result.failed.length > 0) {
-          const details = result.failed
-            .map((item) => `${item.name}: ${item.error}`)
-            .join('; ');
+          const details = result.failed.map((item) => `${item.name}: ${item.error}`).join('; ');
           showNotification(`${t('notification.upload_failed')}: ${details}`, 'error');
         }
       } catch (err: unknown) {
@@ -319,9 +319,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
                 return;
               }
 
-              const result = await authFilesApi.deleteFiles(
-                filesToDelete.map((file) => file.name)
-              );
+              const result = await authFilesApi.deleteFiles(filesToDelete.map((file) => file.name));
               const success = result.deleted;
               const failed = result.failed.length;
 
@@ -503,7 +501,10 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
         );
 
         if (failCount === 0) {
-          showNotification(t('auth_files.batch_status_success', { count: successCount }), 'success');
+          showNotification(
+            t('auth_files.batch_status_success', { count: successCount }),
+            'success'
+          );
         } else {
           showNotification(
             t('auth_files.batch_status_partial', { success: successCount, failed: failCount }),
@@ -606,6 +607,8 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
 
   return {
     files,
+    currentAuthPool,
+    authPoolEnabled,
     selectedFiles,
     selectionCount,
     loading,

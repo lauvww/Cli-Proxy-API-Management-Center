@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/components/ui/Button';
 import {
   IconKey,
   IconBot,
   IconFileText,
   IconSatellite
 } from '@/components/ui/icons';
-import { useAuthStore, useConfigStore, useModelsStore } from '@/stores';
-import { apiKeysApi, providersApi, authFilesApi } from '@/services/api';
+import { useAuthStore, useConfigStore, useModelsStore, useNotificationStore } from '@/stores';
+import { apiCallApi, apiKeysApi, providersApi, authFilesApi } from '@/services/api';
+import type { AuthFileItem } from '@/types';
 import styles from './DashboardPage.module.scss';
 
 interface QuickStat {
@@ -28,6 +30,111 @@ interface ProviderStats {
 }
 
 type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'night';
+type ScannerAction = 'scan' | 'delete' | null;
+
+interface InvalidCodexSummary {
+  checked: number;
+  invalid: number;
+  disabled: number;
+  deleted: number;
+  errors: number;
+  lastAction: Exclude<ScannerAction, null> | null;
+  lastRunAt: number | null;
+}
+
+interface CodexQuotaCheckResult {
+  name: string;
+  statusCode: number;
+  errorMessage?: string;
+}
+
+const INVALID_SCAN_CONCURRENCY = 20;
+const INVALID_SCAN_TIMEOUT_MS = 30_000;
+const INVALID_SCAN_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const INVALID_SCAN_USER_AGENT =
+  'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal';
+
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
+const readStringLike = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+};
+
+const resolveAuthFileName = (file: AuthFileItem): string => {
+  const candidates = [file.name, file.id, file['file_name'], file['fileName']];
+  for (const value of candidates) {
+    const normalized = readStringLike(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const resolveAuthIndex = (file: AuthFileItem): string => {
+  const candidates = [file.authIndex, file['auth_index'], file['auth-index']];
+  for (const value of candidates) {
+    const normalized = readStringLike(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const resolveCodexAccountId = (file: AuthFileItem): string => {
+  const idToken = asRecord(file['id_token']) ?? asRecord(file['idToken']);
+  if (!idToken) return '';
+  return readStringLike(idToken['chatgpt_account_id'] ?? idToken['chatgptAccountId']);
+};
+
+const resolveProvider = (file: AuthFileItem): string => {
+  return readStringLike(file.provider || file.type).toLowerCase();
+};
+
+const isAuthFileDisabled = (file: AuthFileItem): boolean => {
+  const raw = file.disabled ?? file['is_disabled'] ?? file['isDisabled'];
+  if (typeof raw === 'boolean') return raw;
+  const normalized = readStringLike(raw).toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+};
+
+const dedupeStrings = (values: string[]): string[] => {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  values.forEach((value) => {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    deduped.push(normalized);
+  });
+  return deduped;
+};
+
+async function runConcurrentTasks<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (!items.length) return [];
+
+  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length));
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) break;
+      results[index] = await worker(items[index]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: safeConcurrency }, () => runWorker()));
+  return results;
+}
 
 function getTimeOfDay(): TimeOfDay {
   const hour = new Date().getHours();
@@ -44,6 +151,7 @@ export function DashboardPage() {
   const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
   const apiBase = useAuthStore((state) => state.apiBase);
   const config = useConfigStore((state) => state.config);
+  const { showNotification } = useNotificationStore();
 
   const models = useModelsStore((state) => state.models);
   const modelsLoading = useModelsStore((state) => state.loading);
@@ -65,6 +173,16 @@ export function DashboardPage() {
   });
 
   const [loading, setLoading] = useState(true);
+  const [scannerAction, setScannerAction] = useState<ScannerAction>(null);
+  const [codexSummary, setCodexSummary] = useState<InvalidCodexSummary>({
+    checked: 0,
+    invalid: 0,
+    disabled: 0,
+    deleted: 0,
+    errors: 0,
+    lastAction: null,
+    lastRunAt: null
+  });
 
   // Time-of-day state for dynamic greeting
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>(getTimeOfDay);
@@ -184,6 +302,238 @@ export function DashboardPage() {
     }
   }, [connectionStatus, fetchModels]);
 
+  const scanInvalidCodexAuthFiles = async () => {
+    if (scannerAction) return;
+    setScannerAction('scan');
+
+    try {
+      const response = await authFilesApi.list();
+      const codexFiles = response.files.filter(
+        (file) => resolveProvider(file) === 'codex' && !isAuthFileDisabled(file)
+      );
+
+      if (!codexFiles.length) {
+        setCodexSummary((prev) => ({
+          ...prev,
+          checked: 0,
+          invalid: 0,
+          disabled: 0,
+          errors: 0,
+          lastAction: 'scan',
+          lastRunAt: Date.now()
+        }));
+        showNotification(t('dashboard.codex_scan_no_targets'), 'info');
+        return;
+      }
+
+      const checkResults = await runConcurrentTasks<AuthFileItem, CodexQuotaCheckResult>(
+        codexFiles,
+        INVALID_SCAN_CONCURRENCY,
+        async (file) => {
+          const name = resolveAuthFileName(file) || '-';
+          const authIndex = resolveAuthIndex(file);
+          if (!authIndex) {
+            return {
+              name,
+              statusCode: -1,
+              errorMessage: 'Missing auth index'
+            };
+          }
+
+          const accountId = resolveCodexAccountId(file);
+          const header: Record<string, string> = {
+            Authorization: 'Bearer $TOKEN$',
+            'Content-Type': 'application/json',
+            'User-Agent': INVALID_SCAN_USER_AGENT
+          };
+          if (accountId) {
+            header['Chatgpt-Account-Id'] = accountId;
+          }
+
+          try {
+            const result = await apiCallApi.request(
+              {
+                authIndex,
+                method: 'GET',
+                url: INVALID_SCAN_USAGE_URL,
+                header
+              },
+              { timeout: INVALID_SCAN_TIMEOUT_MS }
+            );
+            return { name, statusCode: result.statusCode };
+          } catch (err: unknown) {
+            const message =
+              err instanceof Error
+                ? err.message
+                : typeof err === 'string'
+                  ? err
+                  : 'Request failed';
+            return {
+              name,
+              statusCode: -1,
+              errorMessage: message
+            };
+          }
+        }
+      );
+
+      const invalidNames = dedupeStrings(
+        checkResults.filter((item) => item.statusCode === 401).map((item) => item.name)
+      );
+
+      let disabledCount = 0;
+      let disableErrorCount = 0;
+
+      if (invalidNames.length) {
+        const disableResults = await runConcurrentTasks<string, boolean>(
+          invalidNames,
+          INVALID_SCAN_CONCURRENCY,
+          async (name) => {
+            try {
+              await authFilesApi.setStatus(name, true);
+              return true;
+            } catch {
+              return false;
+            }
+          }
+        );
+        disabledCount = disableResults.filter(Boolean).length;
+        disableErrorCount = disableResults.length - disabledCount;
+      }
+
+      const checkErrorCount = checkResults.filter((item) => item.statusCode < 0).length;
+      const checkMessageErrorCount = checkResults.filter((item) => item.errorMessage).length;
+      const totalErrorCount = checkErrorCount + disableErrorCount;
+
+      setCodexSummary((prev) => ({
+        ...prev,
+        checked: checkResults.length,
+        invalid: invalidNames.length,
+        disabled: disabledCount,
+        errors: totalErrorCount,
+        lastAction: 'scan',
+        lastRunAt: Date.now()
+      }));
+
+      if (!invalidNames.length) {
+        showNotification(t('dashboard.codex_scan_no_401'), 'success');
+      } else if (disabledCount === invalidNames.length && totalErrorCount === 0) {
+        showNotification(
+          t('dashboard.codex_scan_done', {
+            checked: checkResults.length,
+            invalid: invalidNames.length,
+            disabled: disabledCount
+          }),
+          'success'
+        );
+      } else {
+        showNotification(
+          t('dashboard.codex_scan_partial', {
+            checked: checkResults.length,
+            invalid: invalidNames.length,
+            disabled: disabledCount,
+            failed: invalidNames.length - disabledCount
+          }),
+          'warning'
+        );
+      }
+
+      if (checkMessageErrorCount > 0 || disableErrorCount > 0) {
+        showNotification(
+          t('dashboard.codex_scan_error_count', {
+            checkErrors: checkMessageErrorCount,
+            disableErrors: disableErrorCount
+          }),
+          'warning'
+        );
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.unknown_error');
+      showNotification(`${t('notification.load_failed')}: ${message}`, 'error');
+    } finally {
+      setScannerAction(null);
+    }
+  };
+
+  const deleteDisabledCodexAuthFiles = async () => {
+    if (scannerAction) return;
+    setScannerAction('delete');
+
+    try {
+      const response = await authFilesApi.list();
+      const targets = dedupeStrings(
+        response.files
+          .filter((file) => resolveProvider(file) === 'codex' && isAuthFileDisabled(file))
+          .map((file) => resolveAuthFileName(file))
+      );
+
+      if (!targets.length) {
+        setCodexSummary((prev) => ({
+          ...prev,
+          deleted: 0,
+          errors: 0,
+          lastAction: 'delete',
+          lastRunAt: Date.now()
+        }));
+        showNotification(t('dashboard.codex_delete_no_targets'), 'info');
+        return;
+      }
+
+      const deleteResults = await runConcurrentTasks<string, boolean>(
+        targets,
+        INVALID_SCAN_CONCURRENCY,
+        async (name) => {
+          try {
+            const result = await authFilesApi.deleteFile(name);
+            return result.deleted > 0 || result.status === 'ok';
+          } catch {
+            return false;
+          }
+        }
+      );
+
+      const deletedCount = deleteResults.filter(Boolean).length;
+      const deleteErrorCount = deleteResults.length - deletedCount;
+
+      setCodexSummary((prev) => ({
+        ...prev,
+        deleted: deletedCount,
+        errors: deleteErrorCount,
+        lastAction: 'delete',
+        lastRunAt: Date.now()
+      }));
+
+      setStats((prev) => ({
+        ...prev,
+        authFiles: prev.authFiles !== null ? Math.max(prev.authFiles - deletedCount, 0) : prev.authFiles
+      }));
+
+      if (deletedCount === targets.length && deleteErrorCount === 0) {
+        showNotification(
+          t('dashboard.codex_delete_done', {
+            found: targets.length,
+            deleted: deletedCount
+          }),
+          'success'
+        );
+      } else {
+        showNotification(
+          t('dashboard.codex_delete_partial', {
+            found: targets.length,
+            deleted: deletedCount,
+            failed: targets.length - deletedCount
+          }),
+          'warning'
+        );
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('common.unknown_error');
+      showNotification(`${t('notification.delete_failed')}: ${message}`, 'error');
+    } finally {
+      setScannerAction(null);
+    }
+  };
+
   // Calculate total provider keys only when all provider stats are available.
   const providerStatsReady =
     providerStats.gemini !== null &&
@@ -276,6 +626,16 @@ export function DashboardPage() {
     minute: '2-digit'
   });
 
+  const codexSummaryLastRunText = codexSummary.lastRunAt
+    ? new Date(codexSummary.lastRunAt).toLocaleString(i18n.language)
+    : t('dashboard.codex_last_run_never');
+  const codexSummaryActionText =
+    codexSummary.lastAction === 'scan'
+      ? t('dashboard.codex_action_scan')
+      : codexSummary.lastAction === 'delete'
+        ? t('dashboard.codex_action_delete')
+        : t('dashboard.codex_action_none');
+
   return (
     <div className={styles.dashboard}>
       {/* Decorative background orbs */}
@@ -352,6 +712,59 @@ export function DashboardPage() {
               </div>
             </Link>
           ))}
+          <div
+            className={`${styles.bentoCard} ${styles.bentoScannerCard}`}
+            style={{ animationDelay: `${quickStats.length * 80}ms` }}
+          >
+            <div className={styles.bentoIcon}>
+              <IconBot size={24} />
+            </div>
+            <div className={styles.bentoContent}>
+              <span className={styles.bentoLabel}>{t('dashboard.codex_panel_heading')}</span>
+              <span className={styles.bentoSublabel}>
+                {t('dashboard.codex_last_run', {
+                  action: codexSummaryActionText,
+                  time: codexSummaryLastRunText
+                })}
+              </span>
+            </div>
+            <div className={styles.scannerStatRow}>
+              <span className={styles.scannerStatItem}>
+                {t('dashboard.codex_stat_invalid')}: {codexSummary.invalid}
+              </span>
+              <span className={styles.scannerStatItem}>
+                {t('dashboard.codex_stat_disabled')}: {codexSummary.disabled}
+              </span>
+              <span className={styles.scannerStatItem}>
+                {t('dashboard.codex_stat_deleted')}: {codexSummary.deleted}
+              </span>
+            </div>
+            {connectionStatus !== 'connected' && (
+              <p className={styles.scannerHint}>{t('dashboard.codex_connect_required')}</p>
+            )}
+            <div className={styles.scannerActions}>
+              <Button
+                size="sm"
+                onClick={() => void scanInvalidCodexAuthFiles()}
+                loading={scannerAction === 'scan'}
+                disabled={connectionStatus !== 'connected' || scannerAction !== null}
+              >
+                {t('dashboard.codex_scan_action')}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void deleteDisabledCodexAuthFiles()}
+                loading={scannerAction === 'delete'}
+                disabled={connectionStatus !== 'connected' || scannerAction !== null}
+              >
+                {t('dashboard.codex_delete_action')}
+              </Button>
+              <Link to="/auth-files" className={styles.scannerLink}>
+                {t('dashboard.codex_auth_files_link')}
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 

@@ -29,6 +29,48 @@
   margin: 0;
 }
 
+.poolScope {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 58%, transparent);
+  max-width: 100%;
+}
+
+.poolScopeLabel {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.poolScopeBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 34%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.poolScopePath {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .headerActions {
   display: flex;
   gap: $spacing-sm;

@@ -6,6 +6,14 @@
 import type { GeminiKeyConfig, ProviderKeyConfig, OpenAIProviderConfig } from './provider';
 import type { AmpcodeConfig } from './ampcode';
 
+
+export interface AuthPoolConfig {
+  enabled?: boolean;
+  paths?: string[];
+  activePath?: string;
+  routingStrategyByPath?: Record<string, string>;
+}
+
 export interface QuotaExceededConfig {
   switchProject?: boolean;
   switchPreviewModel?: boolean;
@@ -24,6 +32,7 @@ export interface Config {
   wsAuth?: boolean;
   forceModelPrefix?: boolean;
   routingStrategy?: string;
+  authPool?: AuthPoolConfig;
   apiKeys?: string[];
   ampcode?: AmpcodeConfig;
   geminiApiKeys?: GeminiKeyConfig[];
@@ -47,6 +56,7 @@ export type RawConfigSection =
   | 'ws-auth'
   | 'force-model-prefix'
   | 'routing/strategy'
+  | 'auth-pool'
   | 'api-keys'
   | 'ampcode'
   | 'gemini-api-key'

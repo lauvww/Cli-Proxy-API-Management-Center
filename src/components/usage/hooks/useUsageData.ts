@@ -1,6 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { USAGE_STATS_STALE_TIME_MS, useNotificationStore, useUsageStatsStore } from '@/stores';
+import {
+  USAGE_STATS_STALE_TIME_MS,
+  useNotificationStore,
+  useUsageStatsStore,
+  type LoadUsageStatsOptions,
+  type UsageStatsMeta,
+} from '@/stores';
 import { usageApi } from '@/services/api/usage';
 import { downloadBlob } from '@/utils/download';
 import { loadModelPrices, saveModelPrices, type ModelPrice } from '@/utils/usage';
@@ -16,6 +22,7 @@ export interface UsagePayload {
 
 export interface UseUsageDataReturn {
   usage: UsagePayload | null;
+  meta: UsageStatsMeta;
   loading: boolean;
   error: string;
   lastRefreshedAt: Date | null;
@@ -30,10 +37,11 @@ export interface UseUsageDataReturn {
   importing: boolean;
 }
 
-export function useUsageData(): UseUsageDataReturn {
+export function useUsageData(options: LoadUsageStatsOptions = {}): UseUsageDataReturn {
   const { t } = useTranslation();
   const { showNotification } = useNotificationStore();
   const usageSnapshot = useUsageStatsStore((state) => state.usage);
+  const usageMeta = useUsageStatsStore((state) => state.meta);
   const loading = useUsageStatsStore((state) => state.loading);
   const storeError = useUsageStatsStore((state) => state.error);
   const lastRefreshedAtTs = useUsageStatsStore((state) => state.lastRefreshedAt);
@@ -45,13 +53,13 @@ export function useUsageData(): UseUsageDataReturn {
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadUsage = useCallback(async () => {
-    await loadUsageStats({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
-  }, [loadUsageStats]);
+    await loadUsageStats({ ...options, force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
+  }, [loadUsageStats, options]);
 
   useEffect(() => {
-    void loadUsageStats({ staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {});
+    void loadUsageStats({ ...options, staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {});
     setModelPrices(loadModelPrices());
-  }, [loadUsageStats]);
+  }, [loadUsageStats, options]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -65,7 +73,7 @@ export function useUsageData(): UseUsageDataReturn {
       const filename = `usage-export-${safeTimestamp.replace(/[:.]/g, '-')}.json`;
       downloadBlob({
         filename,
-        blob: new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' })
+        blob: new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' }),
       });
       showNotification(t('usage_stats.export_success'), 'success');
     } catch (err: unknown) {
@@ -105,12 +113,12 @@ export function useUsageData(): UseUsageDataReturn {
           added: result?.added ?? 0,
           skipped: result?.skipped ?? 0,
           total: result?.total_requests ?? 0,
-          failed: result?.failed_requests ?? 0
+          failed: result?.failed_requests ?? 0,
         }),
         'success'
       );
       try {
-        await loadUsageStats({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
+        await loadUsageStats({ ...options, force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : '';
         showNotification(
@@ -140,6 +148,7 @@ export function useUsageData(): UseUsageDataReturn {
 
   return {
     usage,
+    meta: usageMeta,
     loading,
     error,
     lastRefreshedAt,
@@ -151,6 +160,6 @@ export function useUsageData(): UseUsageDataReturn {
     handleImportChange,
     importInputRef,
     exporting,
-    importing
+    importing,
   };
 }
