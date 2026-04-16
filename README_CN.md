@@ -4,7 +4,7 @@
 
 [English](README.md)
 
-**主项目**: https://github.com/router-for-me/CLIProxyAPI  
+**主项目**: https://github.com/lauvww/CLIProxyAPI  
 **示例地址**: https://remote.router-for.me/  
 **最低版本要求**: ≥ 6.8.0（推荐 ≥ 6.8.15）
 
@@ -76,7 +76,7 @@ npm run build
 
 ### 远程管理
 
-当你从非 localhost 的浏览器访问时，服务端通常需要开启远程管理（例如 `allow-remote-management: true`）。  
+当你从非 localhost 的浏览器访问时，服务端通常需要开启远程管理（例如 `allow-remote-management: true`）。
 
 ## 功能一览（按页面对应）
 

@@ -4,7 +4,7 @@ A single-file Web UI (React + TypeScript) for operating and troubleshooting the 
 
 [中文文档](README_CN.md)
 
-**Main Project**: https://github.com/router-for-me/CLIProxyAPI  
+**Main Project**: https://github.com/lauvww/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
 **Minimum Required Version**: ≥ 6.8.0 (recommended ≥ 6.8.15)
 
