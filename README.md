@@ -10,6 +10,14 @@ A single-file Web UI (React + TypeScript) for operating and troubleshooting the 
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the service is running.
 
+## Recent UI Updates
+
+- **Auth pool management** is now treated as a first-class workflow. The Config page keeps the auth-pool mode toggle, while the dedicated Auth Pool page is shown only when the backend reports auth-pool mode enabled.
+- The Auth Pool page focuses on the stable single-active-pool runtime model: you can manage multiple pool paths, switch the current pool, edit the current pool routing strategy, search accounts in the current pool, and quickly enable or disable auth files without reopening the full Auth Files page.
+- The Usage page now follows backend auth-pool metadata more closely. When auth-pool mode is enabled and no explicit pool filter is provided, the page defaults to the current auth pool and shows a scope hint from the server.
+- The Auth Files page keeps using the backend-reported `current_auth_pool` and shared path normalization helpers, so uploads, deletes, edits, and enable/disable actions stay scoped to the current pool.
+- Local builds now stamp the generated `management.html` with a marker so packaged desktop deployments can prefer the locally published management panel instead of overwriting it with the background asset updater.
+
 ## What this is (and isn’t)
 
 - This repository is the Web UI only. It talks to the CLI Proxy API **Management API** (`/v0/management`) to read/update config, upload credentials, view logs, and inspect usage.
@@ -74,16 +82,17 @@ See `api.md` for the full authentication rules, server-side limits, and edge cas
 ## What you can manage (mapped to the UI pages)
 
 - **Dashboard**: connection status, server version/build date, quick counts, model availability snapshot.
-- **Basic Settings**: debug, proxy URL, request retry, quota fallback (switch project or preview models when limits reached), usage statistics, request logging, file logging, WebSocket auth.
+- **Basic Settings**: debug, proxy URL, request retry, quota fallback (switch project or preview models when limits reached), usage statistics, request logging, file logging, WebSocket auth, and the auth-pool mode toggle.
 - **API Keys**: manage proxy `api-keys` (add/edit/delete).
 - **AI Providers**:
   - Gemini/Codex/Claude/Vertex key entries (base URL, headers, proxy, model aliases, excluded models, prefix).
   - OpenAI-compatible providers (multiple API keys, custom headers, model alias import via `/v1/models`, optional browser-side "chat/completions" test).
   - Ampcode integration (upstream URL/key, force mappings, model mapping table).
+- **Auth Pool**: maintain multiple auth-pool paths, switch the current pool, update the current pool routing strategy, review the single-active-pool runtime behavior, and quickly search/enable/disable auth files in the current pool.
 - **Auth Files**: upload/download/delete JSON credentials, filter/search/pagination, runtime-only indicators, view supported models per credential (when the server supports it), manage OAuth excluded models (supports `*` wildcards), configure OAuth model alias mappings.
 - **OAuth**: start OAuth/device flows for supported providers, poll status, optionally submit callback `redirect_url`; includes iFlow cookie import.
 - **Quota Management**: manage quota limits and usage for Claude, Antigravity, Codex, Gemini CLI, and other providers.
-- **Usage**: requests/tokens charts (hour/day), per-API & per-model breakdown, cached/reasoning token breakdown, RPM/TPM window, optional cost estimation with locally-saved model pricing.
+- **Usage**: requests/tokens charts (hour/day), per-API & per-model breakdown, cached/reasoning token breakdown, RPM/TPM window, optional cost estimation with locally-saved model pricing, and current-auth-pool default scoping when auth-pool mode is enabled.
 - **Config**: edit `/config.yaml` in-browser with YAML highlighting + search, then save/reload.
 - **Logs**: tail logs with incremental polling, auto-refresh, search, hide management traffic, clear logs; download request error log files.
 - **System**: quick links + fetch `/v1/models` (grouped view). Requires at least one proxy API key to query models.
@@ -120,6 +129,8 @@ The UI language is automatically detected from browser settings and can be manua
 
 - Vite produces a **single HTML** output (`dist/index.html`) with all assets inlined (via `vite-plugin-singlefile`).
 - Tagging `vX.Y.Z` triggers `.github/workflows/release.yml` to publish `dist/management.html`.
+- Desktop packaging typically copies or renames the built `dist/index.html` to `management.html` during release/publish.
+- The build injects a local management build marker so CLI Proxy API can recognize a locally published management page and avoid replacing it with a downloaded fallback asset.
 - The UI version shown in the footer is injected at build time (env `VERSION`, git tag, or `package.json` fallback).
 
 ## Security notes
