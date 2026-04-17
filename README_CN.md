@@ -140,6 +140,10 @@ npm run build
 - 构建阶段会注入本地管理页标记，CLI Proxy API 可以识别本地发布的管理页，从而避免被下载得到的后备管理页覆盖。
 - 页脚显示的 UI 版本在构建期注入（优先使用环境变量 `VERSION`，否则使用 git tag / `package.json`）。
 
+## 版本管理
+
+版本规则见 [VERSIONING.md](VERSIONING.md)。管理中心版本以仓库中的 `VERSION` 文件为准，并应与后端版本保持一致。
+
 ## 安全提示
 
 - 管理密钥会存入浏览器 `localStorage`，并使用轻量混淆格式（`enc::v1::...`）避免明文；仍应视为敏感信息。

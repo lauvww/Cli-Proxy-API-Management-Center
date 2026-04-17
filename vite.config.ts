@@ -25,7 +25,17 @@ function getVersion(): string {
     return process.env.VERSION;
   }
 
-  // 2. Try git tag
+  // 2. VERSION file
+  try {
+    const versionFile = fs.readFileSync(path.resolve(__dirname, 'VERSION'), 'utf8').trim();
+    if (versionFile) {
+      return versionFile;
+    }
+  } catch {
+    // VERSION file not readable
+  }
+
+  // 3. Try git tag
   const gitTag =
     tryGitDescribe(['describe', '--tags', '--exact-match']) ||
     tryGitDescribe(['describe', '--tags']);
@@ -33,7 +43,7 @@ function getVersion(): string {
     return gitTag;
   }
 
-  // 3. Fall back to package.json version
+  // 4. Fall back to package.json version
   try {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'));
     if (pkg.version && pkg.version !== '0.0.0') {

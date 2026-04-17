@@ -133,6 +133,10 @@ The UI language is automatically detected from browser settings and can be manua
 - The build injects a local management build marker so CLI Proxy API can recognize a locally published management page and avoid replacing it with a downloaded fallback asset.
 - The UI version shown in the footer is injected at build time (env `VERSION`, git tag, or `package.json` fallback).
 
+## Versioning
+
+See [VERSIONING.md](VERSIONING.md). The UI version is managed through the repository `VERSION` file and should stay aligned with the backend fork version.
+
 ## Security notes
 
 - The management key is stored in browser `localStorage` using a lightweight obfuscation format (`enc::v1::...`) to avoid plaintext storage; treat it as sensitive.
