@@ -47,6 +47,30 @@ function parseApiKeysText(raw: unknown): string {
   return keys.join('\n');
 }
 
+function parseAPIKeyAliases(raw: unknown, apiKeysText: string): Record<string, string> {
+  const record = asRecord(raw);
+  if (!record) return {};
+
+  const validKeys = new Set(
+    apiKeysText
+      .split('\n')
+      .map((key) => key.trim())
+      .filter(Boolean)
+  );
+  if (validKeys.size === 0) return {};
+
+  const aliases = Object.fromEntries(
+    Object.entries(record)
+      .map(([key, value]) => [
+        String(key ?? '').trim(),
+        typeof value === 'string' ? value.trim() : '',
+      ])
+      .filter(([key, value]) => key && value && validKeys.has(key))
+  );
+
+  return aliases;
+}
+
 function resolveApiKeysText(parsed: Record<string, unknown>): string {
   if (Object.prototype.hasOwnProperty.call(parsed, 'api-keys')) {
     return parseApiKeysText(parsed['api-keys']);
@@ -197,6 +221,18 @@ function hasPayloadParamValidationErrors(rules: PayloadRule[]): boolean {
 function deepClone<T>(value: T): T {
   if (typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function areStringMapsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftEntries = Object.entries(left).filter(([key, value]) => key && value);
+  const rightEntries = Object.entries(right).filter(([key, value]) => key && value);
+  if (leftEntries.length !== rightEntries.length) return false;
+
+  const rightMap = new Map(rightEntries);
+  for (const [key, value] of leftEntries) {
+    if (rightMap.get(key) !== value) return false;
+  }
+  return true;
 }
 
 function arePayloadModelEntriesEqual(
@@ -590,6 +626,12 @@ function getNextDirtyFields(
   if (Object.prototype.hasOwnProperty.call(patch, 'apiKeysText')) {
     updateDirty('apiKeysText', nextValues.apiKeysText === baselineValues.apiKeysText);
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'apiKeyAliases')) {
+    updateDirty(
+      'apiKeyAliases',
+      areStringMapsEqual(nextValues.apiKeyAliases, baselineValues.apiKeyAliases)
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'debug')) {
     updateDirty('debug', nextValues.debug === baselineValues.debug);
   }
@@ -790,6 +832,7 @@ export function useVisualConfig() {
 
       const parsedRaw: unknown = parseYaml(yamlContent) || {};
       const parsed = asRecord(parsedRaw) ?? {};
+      const apiKeysText = resolveApiKeysText(parsed);
       const tls = asRecord(parsed.tls);
       const remoteManagement = asRecord(parsed['remote-management']);
       const quotaExceeded = asRecord(parsed['quota-exceeded']);
@@ -819,8 +862,14 @@ export function useVisualConfig() {
               : '',
 
         authDir: typeof parsed['auth-dir'] === 'string' ? parsed['auth-dir'] : '',
-        authPoolEnabled: Boolean(((parsed['auth-pool'] as Record<string, unknown> | undefined)?.enabled)),
-        apiKeysText: resolveApiKeysText(parsed),
+        authPoolEnabled: Boolean(
+          (parsed['auth-pool'] as Record<string, unknown> | undefined)?.enabled
+        ),
+        apiKeysText,
+        apiKeyAliases: parseAPIKeyAliases(
+          parsed['api-key-aliases'] ?? parsed.apiKeyAliases,
+          apiKeysText
+        ),
 
         debug: Boolean(parsed.debug),
         commercialMode: Boolean(parsed['commercial-mode']),
@@ -926,6 +975,16 @@ export function useVisualConfig() {
         } else if (docHas(doc, ['api-keys'])) {
           doc.deleteIn(['api-keys']);
         }
+        const normalizedAliases = Object.fromEntries(
+          Object.entries(values.apiKeyAliases)
+            .map(([key, value]) => [key.trim(), value.trim()])
+            .filter(([key, value]) => key && value && apiKeys.includes(key))
+        );
+        if (Object.keys(normalizedAliases).length > 0) {
+          doc.setIn(['api-key-aliases'], normalizedAliases);
+        } else if (docHas(doc, ['api-key-aliases'])) {
+          doc.deleteIn(['api-key-aliases']);
+        }
         deleteLegacyApiKeysProvider(doc);
 
         setBooleanInDoc(doc, ['debug'], values.debug);
@@ -951,10 +1010,7 @@ export function useVisualConfig() {
           ensureMapInDoc(doc, ['quota-exceeded']);
           doc.setIn(['quota-exceeded', 'switch-project'], values.quotaSwitchProject);
           doc.setIn(['quota-exceeded', 'switch-preview-model'], values.quotaSwitchPreviewModel);
-          doc.setIn(
-            ['quota-exceeded', 'antigravity-credits'],
-            values.quotaAntigravityCredits
-          );
+          doc.setIn(['quota-exceeded', 'antigravity-credits'], values.quotaAntigravityCredits);
           deleteIfMapEmpty(doc, ['quota-exceeded']);
         }
 

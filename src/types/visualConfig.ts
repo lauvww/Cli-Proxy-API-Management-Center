@@ -65,6 +65,7 @@ export type VisualConfigValues = {
   authDir: string;
   authPoolEnabled: boolean;
   apiKeysText: string;
+  apiKeyAliases: Record<string, string>;
   debug: boolean;
   commercialMode: boolean;
   loggingToFile: boolean;
@@ -106,6 +107,7 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
   authDir: '',
   authPoolEnabled: false,
   apiKeysText: '',
+  apiKeyAliases: {},
   debug: false,
   commercialMode: false,
   loggingToFile: false,

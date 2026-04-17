@@ -1000,7 +1000,7 @@
     "pool_current": "当前号池",
     "pool_plus": "Plus 号池",
     "pool_free": "Free 号池",
-    "pool_all": "全部号池",
+    "pool_all": "全部号池（汇总）",
     "pool_scope_all": "当前范围：全部号池",
     "pool_scope_path": "当前范围：{{path}} · 凭证 {{count}}",
     "range_all": "全部时间",
@@ -1034,7 +1034,7 @@
     "chart_line_hint": "最多同时显示 9 条模型曲线",
     "no_data": "暂无数据",
     "loading_error": "加载失败",
-    "api_endpoint": "API端点",
+    "api_endpoint": "客户端 / API",
     "requests_count": "请求次数",
     "tokens_count": "Token数量",
     "models": "模型统计",
@@ -1089,7 +1089,8 @@
     "output_tokens": "输出 Tokens",
     "last_updated": "更新于",
     "pool_scope_all_auth_pools": "当前显示全部号池汇总统计。",
-    "auth_pool_scope_hint": "当前默认展示号池：{{path}}。如需查看全部号池，请将筛选切换为“全部号池”。"
+    "auth_pool_scope_hint": "当前默认展示号池：{{path}}。如需查看全部号池，请将筛选切换为“全部号池”。",
+    "pool_scope_path_simple": "当前范围：{{path}}"
   },
   "stats": {
     "success": "成功",
@@ -1294,7 +1295,7 @@
           "title": "系统配置",
           "description": "调试、日志、统计与性能调试设置",
           "debug": "调试模式",
-          "debug_desc": "启用详细的调试日志",
+          "debug_desc": "启用更详细的排障日志，用于查看鉴权选择、热重载和运行时诊断信息。",
           "commercial_mode": "商业模式",
           "commercial_mode_desc": "禁用高开销中间件以支持高并发",
           "logging_to_file": "写入日志文件",
@@ -1362,14 +1363,19 @@
         "add": "添加 API 密钥",
         "generate": "生成",
         "empty": "暂无 API 密钥",
-        "hint": "每个条目代表一个 API 密钥（与 「API 密钥管理」 页面样式一致）",
+        "hint": "每个条目代表一个客户端 API 密钥。你还可以为它设置别名，供“使用统计”页面显示。",
         "edit_title": "编辑 API 密钥",
         "add_title": "添加 API 密钥",
         "input_label": "API 密钥",
         "input_placeholder": "粘贴你的 API 密钥",
         "input_hint": "此处仅修改本地配置文件内容，不会自动同步到 API 密钥管理接口",
         "error_empty": "请输入 API 密钥",
-        "error_invalid": "API 密钥包含无效字符"
+        "error_invalid": "API 密钥包含无效字符",
+        "alias_label": "别名",
+        "alias_placeholder": "例如：桌面脚本 / VS Code",
+        "alias_hint": "可选的显示名称。设置后会在“使用统计”中优先显示该别名。",
+        "alias_badge": "别名",
+        "unnamed_alias": "未命名客户端密钥"
       },
       "payload_rules": {
         "rule": "规则",
@@ -1617,6 +1623,10 @@
       "strategy_saved": "当前号池轮询策略已更新",
       "auth_file_enabled": "认证文件已启用",
       "auth_file_disabled": "认证文件已停用"
-    }
+    },
+    "current_pool_name": "当前号池名称",
+    "current_auth_files_count": "当前号池认证文件数",
+    "current_enabled_files": "已启用认证文件",
+    "current_disabled_files": "已停用认证文件"
   }
 }

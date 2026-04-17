@@ -160,12 +160,16 @@ function buildProtocolOptions(
 
 export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
   value,
+  aliases,
   disabled,
   onChange,
+  onAliasesChange,
 }: {
   value: string;
+  aliases: Record<string, string>;
   disabled?: boolean;
   onChange: (nextValue: string) => void;
+  onAliasesChange: (nextAliases: Record<string, string>) => void;
 }) {
   const { t } = useTranslation();
   const showNotification = useNotificationStore((state) => state.showNotification);
@@ -176,6 +180,14 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
         .map((key) => key.trim())
         .filter(Boolean),
     [value]
+  );
+  const apiKeyEntries = useMemo(
+    () =>
+      apiKeys.map((apiKey) => ({
+        apiKey,
+        alias: typeof aliases[apiKey] === 'string' ? aliases[apiKey].trim() : '',
+      })),
+    [aliases, apiKeys]
   );
   const [apiKeyIds, setApiKeyIds] = useState(() => apiKeys.map(() => makeClientId()));
   const renderApiKeyIds = useMemo(() => {
@@ -193,6 +205,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
   const [modalOpen, setModalOpen] = useState(false);
   const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
+  const [aliasValue, setAliasValue] = useState('');
   const [formError, setFormError] = useState('');
 
   function generateSecureApiKey(): string {
@@ -205,6 +218,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
   const openAddModal = () => {
     setEditingApiKeyId(null);
     setInputValue('');
+    setAliasValue('');
     setFormError('');
     setModalOpen(true);
   };
@@ -213,6 +227,7 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     const editingIndex = renderApiKeyIds.findIndex((id) => id === apiKeyId);
     setEditingApiKeyId(apiKeyId);
     setInputValue(apiKeys[editingIndex] ?? '');
+    setAliasValue(apiKeyEntries[editingIndex]?.alias ?? '');
     setFormError('');
     setModalOpen(true);
   };
@@ -220,23 +235,39 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
   const closeModal = () => {
     setModalOpen(false);
     setInputValue('');
+    setAliasValue('');
     setEditingApiKeyId(null);
     setFormError('');
   };
 
-  const updateApiKeys = (nextKeys: string[]) => {
+  const normalizeAliases = (nextKeys: string[], nextAliases: Record<string, string>) =>
+    Object.fromEntries(
+      nextKeys
+        .map((apiKey) => apiKey.trim())
+        .filter(Boolean)
+        .map((apiKey) => [apiKey, String(nextAliases[apiKey] ?? '').trim()] as const)
+        .filter(([, alias]) => alias)
+    );
+
+  const updateApiKeys = (nextKeys: string[], nextAliases: Record<string, string>) => {
     onChange(nextKeys.join('\n'));
+    onAliasesChange(normalizeAliases(nextKeys, nextAliases));
   };
 
   const handleDelete = (apiKeyId: string) => {
     const index = renderApiKeyIds.findIndex((id) => id === apiKeyId);
     if (index < 0) return;
+    const apiKeyToDelete = apiKeys[index];
     setApiKeyIds(renderApiKeyIds.filter((id) => id !== apiKeyId));
-    updateApiKeys(apiKeys.filter((_, i) => i !== index));
+    const nextKeys = apiKeys.filter((_, i) => i !== index);
+    const nextAliases = { ...aliases };
+    delete nextAliases[apiKeyToDelete];
+    updateApiKeys(nextKeys, nextAliases);
   };
 
   const handleSave = () => {
     const trimmed = inputValue.trim();
+    const trimmedAlias = aliasValue.trim();
     if (!trimmed) {
       setFormError(t('config_management.visual.api_keys.error_empty'));
       return;
@@ -249,14 +280,24 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
     const editingIndex = editingApiKeyId
       ? renderApiKeyIds.findIndex((id) => id === editingApiKeyId)
       : -1;
+    const previousKey = editingIndex >= 0 ? apiKeys[editingIndex] : '';
     const nextKeys =
       editingApiKeyId === null
         ? [...apiKeys, trimmed]
         : apiKeys.map((key, idx) => (idx === editingIndex ? trimmed : key));
+    const nextAliases = { ...aliases };
+    if (previousKey && previousKey !== trimmed) {
+      delete nextAliases[previousKey];
+    }
+    if (trimmedAlias) {
+      nextAliases[trimmed] = trimmedAlias;
+    } else {
+      delete nextAliases[trimmed];
+    }
     if (editingApiKeyId === null) {
       setApiKeyIds([...renderApiKeyIds, makeClientId()]);
     }
-    updateApiKeys(nextKeys);
+    updateApiKeys(nextKeys, nextAliases);
     closeModal();
   };
 
@@ -291,9 +332,15 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
               <div className="item-meta">
                 <div className="pill">#{index + 1}</div>
                 <div className="item-title">
-                  {t('config_management.visual.api_keys.input_label')}
+                  {apiKeyEntries[index]?.alias ||
+                    t('config_management.visual.api_keys.unnamed_alias')}
                 </div>
                 <div className="item-subtitle">{maskApiKey(String(key || ''))}</div>
+                {apiKeyEntries[index]?.alias ? (
+                  <div className={styles.apiKeyAliasMeta}>
+                    {t('config_management.visual.api_keys.alias_badge')}
+                  </div>
+                ) : null}
               </div>
               <div className="item-actions">
                 <Button
@@ -382,6 +429,20 @@ export const ApiKeysCardEditor = memo(function ApiKeysCardEditor({
               {formError}
             </div>
           )}
+        </div>
+        <div className="form-group">
+          <label htmlFor={`${apiKeyInputId}-alias`}>
+            {t('config_management.visual.api_keys.alias_label')}
+          </label>
+          <input
+            id={`${apiKeyInputId}-alias`}
+            className="input"
+            placeholder={t('config_management.visual.api_keys.alias_placeholder')}
+            value={aliasValue}
+            onChange={(e) => setAliasValue(e.target.value)}
+            disabled={disabled}
+          />
+          <div className="hint">{t('config_management.visual.api_keys.alias_hint')}</div>
         </div>
       </Modal>
     </div>
@@ -668,7 +729,9 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                       placeholder={t('config_management.visual.payload_rules.model_name')}
                       ariaLabel={t('config_management.visual.payload_rules.model_name')}
                       value={model.name}
-                      onChange={(nextValue) => updateModel(ruleIndex, modelIndex, { name: nextValue })}
+                      onChange={(nextValue) =>
+                        updateModel(ruleIndex, modelIndex, { name: nextValue })
+                      }
                       disabled={disabled}
                     />
                   </>
@@ -678,7 +741,9 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                       placeholder={t('config_management.visual.payload_rules.model_name')}
                       ariaLabel={t('config_management.visual.payload_rules.model_name')}
                       value={model.name}
-                      onChange={(nextValue) => updateModel(ruleIndex, modelIndex, { name: nextValue })}
+                      onChange={(nextValue) =>
+                        updateModel(ruleIndex, modelIndex, { name: nextValue })
+                      }
                       disabled={disabled}
                     />
                     <Select
@@ -731,7 +796,9 @@ export const PayloadRulesEditor = memo(function PayloadRulesEditor({
                       placeholder={t('config_management.visual.payload_rules.json_path')}
                       ariaLabel={t('config_management.visual.payload_rules.json_path')}
                       value={param.path}
-                      onChange={(nextValue) => updateParam(ruleIndex, paramIndex, { path: nextValue })}
+                      onChange={(nextValue) =>
+                        updateParam(ruleIndex, paramIndex, { path: nextValue })
+                      }
                       disabled={disabled}
                     />
                     {rawJsonValues ? null : (

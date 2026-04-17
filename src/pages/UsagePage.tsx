@@ -14,13 +14,13 @@ import {
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Select } from '@/components/ui/Select';
+import { useInterval } from '@/hooks/useInterval';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useAuthStore, useThemeStore, useConfigStore, useModelsStore } from '@/stores';
 import { apiKeysApi } from '@/services/api/apiKeys';
 import { authFilesApi } from '@/services/api/authFiles';
 import { authPoolApi } from '@/services/api/authPool';
-import type { UsagePoolType } from '@/services/api/usage';
 import {
   StatCards,
   UsageChart,
@@ -47,6 +47,7 @@ import {
 } from '@/utils/usage';
 import type { AuthFileItem } from '@/types';
 import {
+  getAuthPoolName,
   getAuthPoolStateFromConfig,
   normalizePathForCompare,
   normalizePathForDisplay,
@@ -73,9 +74,10 @@ const POOL_FILTER_STORAGE_KEY = 'cli-proxy-usage-pool-filter-v1';
 const PATH_POOL_FILTER_PREFIX = 'path:';
 const DEFAULT_CHART_LINES = ['all'];
 const DEFAULT_TIME_RANGE: UsageTimeRange = '24h';
+type CurrentPoolFilter = 'current';
 type PathPoolFilter = `path:${string}`;
-type UsagePoolFilter = 'plus' | 'free' | 'all' | PathPoolFilter;
-const DEFAULT_POOL_FILTER: UsagePoolFilter = 'all';
+type UsagePoolFilter = CurrentPoolFilter | 'all' | PathPoolFilter;
+const DEFAULT_POOL_FILTER: UsagePoolFilter = 'current';
 const MAX_CHART_LINES = 9;
 const TIME_RANGE_OPTIONS: ReadonlyArray<{ value: UsageTimeRange; labelKey: string }> = [
   { value: 'all', labelKey: 'usage_stats.range_all' },
@@ -88,6 +90,7 @@ const HOUR_WINDOW_BY_TIME_RANGE: Record<Exclude<UsageTimeRange, 'all'>, number> 
   '24h': 24,
   '7d': 7 * 24,
 };
+const USAGE_AUTO_REFRESH_MS = 15_000;
 
 const normalizeApiKeyList = (input: unknown): string[] => {
   if (!Array.isArray(input)) return [];
@@ -184,7 +187,7 @@ const createPathPoolFilter = (normalizedPath: string): PathPoolFilter =>
   `${PATH_POOL_FILTER_PREFIX}${normalizedPath}` as PathPoolFilter;
 
 const isUsagePoolFilter = (value: unknown): value is UsagePoolFilter =>
-  value === 'plus' || value === 'free' || value === 'all' || isPathPoolFilter(value);
+  value === 'current' || value === 'all' || isPathPoolFilter(value);
 
 const loadPoolFilter = (): UsagePoolFilter => {
   try {
@@ -211,27 +214,6 @@ const extractAuthDir = (raw: Record<string, unknown> | undefined): string => {
   return '';
 };
 
-const buildDefaultPoolPaths = (authDir: string): string[] => {
-  const trimmed = authDir.trim();
-  if (!trimmed) return [];
-
-  const withoutTrailingSeparators = trimmed.replace(/[\\/]+$/, '');
-  if (!withoutTrailingSeparators) return [];
-
-  let basePath = withoutTrailingSeparators;
-  if (/[\\/](plus|free)$/i.test(withoutTrailingSeparators)) {
-    const segmentIndex = Math.max(
-      withoutTrailingSeparators.lastIndexOf('\\'),
-      withoutTrailingSeparators.lastIndexOf('/')
-    );
-    if (segmentIndex <= 0) return [];
-    basePath = withoutTrailingSeparators.slice(0, segmentIndex);
-  }
-
-  const separator = basePath.includes('\\') ? '\\' : '/';
-  return [`${basePath}${separator}Plus`, `${basePath}${separator}Free`];
-};
-
 const getAuthFilePathCandidates = (file: AuthFileItem): string[] =>
   [file.path, file.filePath, file.filepath, file.fullPath, file.absolutePath, file.absolute_path]
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
@@ -247,23 +229,6 @@ const resolveAuthFileDirectory = (path: string): string => {
     return normalized.slice(0, lastSeparatorIndex);
   }
   return normalized;
-};
-
-const inferPoolTypeFromPath = (path: string): Exclude<UsagePoolType, 'all'> => {
-  const normalized = normalizePathForCompare(path);
-  if (!normalized) return 'custom';
-
-  const segments = normalized
-    .split('\\')
-    .map((segment) => segment.trim().toLowerCase())
-    .filter(Boolean);
-
-  for (let idx = segments.length - 1; idx >= 0; idx--) {
-    const segment = segments[idx];
-    if (segment === 'plus') return 'plus';
-    if (segment === 'free') return 'free';
-  }
-  return 'custom';
 };
 
 export function UsagePage() {
@@ -394,7 +359,6 @@ export function UsagePage() {
     () => extractAuthDir(config?.raw as Record<string, unknown> | undefined),
     [config?.raw]
   );
-  const defaultPoolPaths = useMemo(() => buildDefaultPoolPaths(currentAuthDir), [currentAuthDir]);
   const discoveredPoolPaths = useMemo(() => {
     const pathMap = new Map<string, string>();
 
@@ -412,7 +376,6 @@ export function UsagePage() {
       registerPath(authPoolState.authDir);
     } else {
       registerPath(currentAuthDir);
-      defaultPoolPaths.forEach((path) => registerPath(path));
     }
 
     authFilesForPools.forEach((file) => {
@@ -432,20 +395,9 @@ export function UsagePage() {
     authPoolState.enabled,
     authPoolState.paths,
     currentAuthDir,
-    defaultPoolPaths,
   ]);
   const poolPathDisplayMap = useMemo(
     () => new Map(discoveredPoolPaths.map((entry) => [entry.normalized, entry.display])),
-    [discoveredPoolPaths]
-  );
-  const plusPoolPath = useMemo(
-    () =>
-      discoveredPoolPaths.find((entry) => /[\\]plus$/i.test(entry.normalized))?.normalized ?? '',
-    [discoveredPoolPaths]
-  );
-  const freePoolPath = useMemo(
-    () =>
-      discoveredPoolPaths.find((entry) => /[\\]free$/i.test(entry.normalized))?.normalized ?? '',
     [discoveredPoolPaths]
   );
   const hasPoolPathMetadata = useMemo(
@@ -456,36 +408,38 @@ export function UsagePage() {
     if (isUsagePoolFilter(poolFilter)) return poolFilter;
     return DEFAULT_POOL_FILTER;
   }, [poolFilter]);
-  const selectedPoolPath = useMemo(() => {
-    if (resolvedPoolFilter === 'all') return '';
-    if (resolvedPoolFilter === 'plus') return plusPoolPath;
-    if (resolvedPoolFilter === 'free') return freePoolPath;
-    if (isPathPoolFilter(resolvedPoolFilter)) {
-      return normalizePathForCompare(resolvedPoolFilter.slice(PATH_POOL_FILTER_PREFIX.length));
-    }
-    return '';
-  }, [freePoolPath, plusPoolPath, resolvedPoolFilter]);
-  const requestedServerPoolType = useMemo<UsagePoolType>(() => {
-    if (resolvedPoolFilter === 'all') return 'all';
-    if (resolvedPoolFilter === 'plus' || resolvedPoolFilter === 'free') return resolvedPoolFilter;
-    if (isPathPoolFilter(resolvedPoolFilter)) {
-      return inferPoolTypeFromPath(resolvedPoolFilter.slice(PATH_POOL_FILTER_PREFIX.length));
-    }
-    return 'custom';
-  }, [resolvedPoolFilter]);
   const currentAuthPoolDisplayPath = useMemo(
     () => resolveAuthPoolDisplayPath(authPoolState),
     [authPoolState]
   );
+  const selectedPoolPath = useMemo(() => {
+    if (resolvedPoolFilter === 'all') return '';
+    if (resolvedPoolFilter === 'current') {
+      if (!authPoolState.enabled) return '';
+      return normalizePathForCompare(
+        currentAuthPoolDisplayPath || authPoolState.activePath || authPoolState.authDir
+      );
+    }
+    if (isPathPoolFilter(resolvedPoolFilter)) {
+      return normalizePathForCompare(resolvedPoolFilter.slice(PATH_POOL_FILTER_PREFIX.length));
+    }
+    return '';
+  }, [
+    authPoolState.activePath,
+    authPoolState.authDir,
+    currentAuthPoolDisplayPath,
+    resolvedPoolFilter,
+  ]);
   const requestedAuthPoolFilter = useMemo(() => {
-    if (authPoolState.enabled && resolvedPoolFilter === 'all') {
+    if (resolvedPoolFilter === 'all') {
       return 'all';
     }
-    if (resolvedPoolFilter === 'plus') {
-      return plusPoolPath ? (poolPathDisplayMap.get(plusPoolPath) ?? plusPoolPath) : '';
-    }
-    if (resolvedPoolFilter === 'free') {
-      return freePoolPath ? (poolPathDisplayMap.get(freePoolPath) ?? freePoolPath) : '';
+    if (resolvedPoolFilter === 'current') {
+      if (!authPoolState.enabled) return '';
+      const normalizedCurrentPath = normalizePathForCompare(
+        currentAuthPoolDisplayPath || authPoolState.activePath || authPoolState.authDir
+      );
+      return poolPathDisplayMap.get(normalizedCurrentPath) ?? normalizedCurrentPath;
     }
     if (isPathPoolFilter(resolvedPoolFilter)) {
       const normalizedPath = normalizePathForCompare(
@@ -493,29 +447,19 @@ export function UsagePage() {
       );
       return poolPathDisplayMap.get(normalizedPath) ?? normalizedPath;
     }
-    if (authPoolState.enabled && currentAuthPoolDisplayPath) {
-      return currentAuthPoolDisplayPath;
-    }
     return '';
   }, [
-    authPoolState.enabled,
+    authPoolState.activePath,
+    authPoolState.authDir,
     currentAuthPoolDisplayPath,
-    freePoolPath,
-    plusPoolPath,
     poolPathDisplayMap,
     resolvedPoolFilter,
   ]);
   const usageQueryOptions = useMemo(
     () => ({
-      pool:
-        !requestedAuthPoolFilter && resolvedPoolFilter !== 'all'
-          ? requestedServerPoolType
-          : authPoolState.enabled && resolvedPoolFilter === 'all'
-            ? 'all'
-            : undefined,
       authPool: requestedAuthPoolFilter || undefined,
     }),
-    [authPoolState.enabled, requestedAuthPoolFilter, requestedServerPoolType, resolvedPoolFilter]
+    [requestedAuthPoolFilter]
   );
   const {
     usage,
@@ -554,6 +498,15 @@ export function UsagePage() {
   }, [fetchConfig, loadAuthFilesForPools, loadUsage, refreshAuthPool]);
 
   useHeaderRefresh(handleHeaderRefresh);
+  useInterval(
+    () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return;
+      }
+      void loadUsage().catch(() => {});
+    },
+    connectionStatus === 'connected' ? USAGE_AUTO_REFRESH_MS : null
+  );
   const selectedPoolAuthIndexes = useMemo(() => {
     if (!selectedPoolPath) return new Set<string>();
     const result = new Set<string>();
@@ -576,18 +529,19 @@ export function UsagePage() {
     return result;
   }, [authFilesForPools, selectedPoolPath]);
   useEffect(() => {
-    if (poolFilterInitializedRef.current) return;
     if (!authPoolState.enabled) {
-      poolFilterInitializedRef.current = true;
+      poolFilterInitializedRef.current = false;
+      if (resolvedPoolFilter !== 'all') {
+        setPoolFilter('all');
+      }
       return;
     }
+    if (poolFilterInitializedRef.current) return;
     const normalizedCurrentPool = normalizePathForCompare(
       currentAuthPoolDisplayPath || authPoolState.activePath || authPoolState.authDir
     );
     if (!normalizedCurrentPool) return;
-    if (resolvedPoolFilter === 'all') {
-      setPoolFilter(createPathPoolFilter(normalizedCurrentPool));
-    }
+    setPoolFilter('current');
     poolFilterInitializedRef.current = true;
   }, [
     authPoolState.activePath,
@@ -596,67 +550,36 @@ export function UsagePage() {
     currentAuthPoolDisplayPath,
     resolvedPoolFilter,
   ]);
-  const customPoolOptions = useMemo(() => {
-    const reservedPaths = new Set<string>(
-      [normalizePathForCompare(currentAuthDir), plusPoolPath, freePoolPath].filter(Boolean)
-    );
-
-    return discoveredPoolPaths
-      .filter((entry) => !reservedPaths.has(entry.normalized))
-      .sort((left, right) =>
-        left.display.localeCompare(right.display, undefined, { sensitivity: 'base' })
-      )
-      .map((entry) => ({
+  const poolPathOptions = useMemo(
+    () =>
+      discoveredPoolPaths.map((entry) => ({
         value: createPathPoolFilter(entry.normalized),
-        label: entry.display,
-      }));
-  }, [currentAuthDir, discoveredPoolPaths, freePoolPath, plusPoolPath]);
-  const selectedCustomPoolOption = useMemo(() => {
-    if (!isPathPoolFilter(resolvedPoolFilter)) return null;
-    if (customPoolOptions.some((option) => option.value === resolvedPoolFilter)) return null;
-
-    const normalizedPath = normalizePathForCompare(
-      resolvedPoolFilter.slice(PATH_POOL_FILTER_PREFIX.length)
-    );
-    if (!normalizedPath) return null;
-
-    return {
-      value: createPathPoolFilter(normalizedPath),
-      label: poolPathDisplayMap.get(normalizedPath) ?? normalizedPath,
-    };
-  }, [customPoolOptions, poolPathDisplayMap, resolvedPoolFilter]);
+        label: getAuthPoolName(entry.display) || entry.display,
+      })),
+    [discoveredPoolPaths]
+  );
   const poolFilterOptions = useMemo(() => {
     const options: Array<{ value: UsagePoolFilter; label: string }> = [];
-    const currentPoolFilter = currentAuthPoolDisplayPath
-      ? createPathPoolFilter(normalizePathForCompare(currentAuthPoolDisplayPath))
-      : null;
-    if (authPoolState.enabled && currentPoolFilter) {
-      options.push({ value: currentPoolFilter, label: t('usage_stats.pool_current') });
-    }
-    options.push(
-      { value: 'plus', label: t('usage_stats.pool_plus') },
-      { value: 'free', label: t('usage_stats.pool_free') }
-    );
 
     if (
-      selectedCustomPoolOption &&
-      !options.some((option) => option.value === selectedCustomPoolOption.value)
+      authPoolState.enabled &&
+      (currentAuthPoolDisplayPath || authPoolState.activePath || authPoolState.authDir)
     ) {
-      options.push(selectedCustomPoolOption);
+      options.push({ value: 'current', label: t('usage_stats.pool_current') });
     }
 
-    customPoolOptions.forEach((option) => {
-      if (!options.some((item) => item.value === option.value)) {
-        options.push(option);
-      }
+    poolPathOptions.forEach((option) => {
+      options.push({ value: option.value, label: option.label });
     });
+
     options.push({ value: 'all', label: t('usage_stats.pool_all') });
     return options;
   }, [
+    authPoolState.activePath,
+    authPoolState.authDir,
     authPoolState.enabled,
     currentAuthPoolDisplayPath,
-    customPoolOptions,
-    selectedCustomPoolOption,
+    poolPathOptions,
     t,
   ]);
 
@@ -666,11 +589,9 @@ export function UsagePage() {
   );
   const poolScopedUsage = useMemo(() => filteredUsage, [filteredUsage]);
   const selectedPoolDisplayPath = useMemo(() => {
-    if (resolvedPoolFilter === 'plus') {
-      return poolPathDisplayMap.get(plusPoolPath) ?? plusPoolPath;
-    }
-    if (resolvedPoolFilter === 'free') {
-      return poolPathDisplayMap.get(freePoolPath) ?? freePoolPath;
+    if (resolvedPoolFilter === 'current') {
+      if (!authPoolState.enabled) return '';
+      return effectiveCurrentAuthPoolDisplayPath;
     }
     if (isPathPoolFilter(resolvedPoolFilter)) {
       const normalizedPath = normalizePathForCompare(
@@ -679,7 +600,12 @@ export function UsagePage() {
       return poolPathDisplayMap.get(normalizedPath) ?? normalizedPath;
     }
     return '';
-  }, [freePoolPath, plusPoolPath, poolPathDisplayMap, resolvedPoolFilter]);
+  }, [
+    authPoolState.enabled,
+    effectiveCurrentAuthPoolDisplayPath,
+    poolPathDisplayMap,
+    resolvedPoolFilter,
+  ]);
   const poolScopeLabel = useMemo(() => {
     if (authPoolState.enabled && usageMeta.current_auth_pool && resolvedPoolFilter === 'all') {
       return t('usage_stats.pool_scope_all_auth_pools');
@@ -687,15 +613,19 @@ export function UsagePage() {
     if (resolvedPoolFilter === 'all') {
       return t('usage_stats.pool_scope_all');
     }
+    const targetPath =
+      selectedPoolDisplayPath || effectiveCurrentAuthPoolDisplayPath || t('common.not_set');
+    if (resolvedPoolFilter !== 'current') {
+      return t('usage_stats.pool_scope_path_simple', {
+        path: targetPath,
+      });
+    }
     if (!hasPoolPathMetadata) {
       return t('usage_stats.pool_scope_path', {
         path: t('common.not_set'),
         count: 0,
       });
     }
-
-    const targetPath =
-      selectedPoolDisplayPath || effectiveCurrentAuthPoolDisplayPath || t('common.not_set');
     return t('usage_stats.pool_scope_path', {
       path: targetPath,
       count: selectedPoolAuthIndexes.size,
@@ -767,7 +697,9 @@ export function UsagePage() {
   }, [poolFilter]);
 
   const nowMs = lastRefreshedAt?.getTime() ?? 0;
-  const effectiveLoading = loading;
+  const hasUsageData = Boolean(usage);
+  const effectiveLoading = loading && !hasUsageData;
+  const isRefreshing = loading && hasUsageData;
 
   // Sparklines hook
   const { requestsSparkline, tokensSparkline, rpmSparkline, tpmSparkline, costSparkline } =
@@ -808,8 +740,8 @@ export function UsagePage() {
     [usageModelNames, apiModelNames]
   );
   const apiStats = useMemo(
-    () => getApiStats(poolScopedUsage, modelPrices),
-    [poolScopedUsage, modelPrices]
+    () => getApiStats(poolScopedUsage, modelPrices, config?.apiKeyAliases ?? {}),
+    [config?.apiKeyAliases, modelPrices, poolScopedUsage]
   );
   const modelStats = useMemo(
     () => getModelStats(poolScopedUsage, modelPrices),
@@ -822,18 +754,7 @@ export function UsagePage() {
       t('common.not_set'),
     [poolFilterOptions, resolvedPoolFilter, t]
   );
-  const quickPoolFilterOptions = useMemo(() => {
-    const quickValues: UsagePoolFilter[] = ['plus', 'free'];
-    if (isPathPoolFilter(resolvedPoolFilter)) {
-      quickValues.push(resolvedPoolFilter);
-    }
-    quickValues.push('all');
-
-    return quickValues.map((value) => ({
-      value,
-      label: poolFilterOptions.find((option) => option.value === value)?.label ?? String(value),
-    }));
-  }, [poolFilterOptions, resolvedPoolFilter]);
+  const quickPoolFilterOptions = poolFilterOptions;
 
   return (
     <div className={styles.container}>
@@ -893,9 +814,9 @@ export function UsagePage() {
             variant="secondary"
             size="sm"
             onClick={() => void handleHeaderRefresh().catch(() => {})}
-            disabled={effectiveLoading || exporting || importing}
+            disabled={exporting || importing}
           >
-            {effectiveLoading ? t('common.loading') : t('usage_stats.refresh')}
+            {isRefreshing ? t('usage_stats.refresh') : t('usage_stats.refresh')}
           </Button>
           <input
             ref={importInputRef}
@@ -904,6 +825,9 @@ export function UsagePage() {
             style={{ display: 'none' }}
             onChange={handleImportChange}
           />
+          {isRefreshing ? (
+            <span className={styles.lastRefreshed}>{t('common.loading')}</span>
+          ) : null}
           {lastRefreshedAt && (
             <span className={styles.lastRefreshed}>
               {t('usage_stats.last_updated')}: {lastRefreshedAt.toLocaleTimeString()}

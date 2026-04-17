@@ -1019,6 +1019,26 @@
   }
 }
 
+.apiKeyAliasMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary-color) 12%, var(--bg-primary)),
+    color-mix(in srgb, var(--bg-secondary) 94%, transparent)
+  );
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 380px) {
   .overview,
   .sections {

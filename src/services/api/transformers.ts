@@ -98,6 +98,18 @@ const normalizePrefix = (value: unknown): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
+const normalizeStringMap = (input: unknown): Record<string, string> | undefined => {
+  if (!isRecord(input)) return undefined;
+
+  const normalized = Object.fromEntries(
+    Object.entries(input)
+      .map(([key, value]) => [String(key ?? '').trim(), String(value ?? '').trim()])
+      .filter(([key, value]) => key && value)
+  );
+
+  return Object.keys(normalized).length ? normalized : undefined;
+};
+
 const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
   if (entry === undefined || entry === null) return null;
   const record = isRecord(entry) ? entry : null;
@@ -458,6 +470,11 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
   const apiKeysRaw = raw['api-keys'] ?? raw.apiKeys;
   if (Array.isArray(apiKeysRaw)) {
     config.apiKeys = apiKeysRaw.map((key) => String(key)).filter((key) => key.trim() !== '');
+  }
+  const apiKeyAliasesRaw = raw['api-key-aliases'] ?? raw.apiKeyAliases;
+  const apiKeyAliases = normalizeStringMap(apiKeyAliasesRaw);
+  if (apiKeyAliases) {
+    config.apiKeyAliases = apiKeyAliases;
   }
 
   const geminiList = raw['gemini-api-key'] ?? raw.geminiApiKey ?? raw.geminiApiKeys;

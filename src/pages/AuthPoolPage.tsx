@@ -1,22 +1,50 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
+import {
+  ANTIGRAVITY_CONFIG,
+  CLAUDE_CONFIG,
+  CODEX_CONFIG,
+  GEMINI_CLI_CONFIG,
+  KIMI_CONFIG,
+} from '@/components/quota';
 import { authPoolApi } from '@/services/api/authPool';
 import { authFilesApi } from '@/services/api/authFiles';
-import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
+import {
+  useAuthStore,
+  useConfigStore,
+  useNotificationStore,
+  useQuotaStore,
+  useThemeStore,
+  useUsageStatsStore,
+} from '@/stores';
 import type { AuthFileItem } from '@/types';
 import {
   authPoolPathsEqual,
+  getAuthPoolName,
   getAuthPoolStateFromConfig,
   normalizePathForCompare,
   resolveAuthPoolDisplayPath,
   type AuthPoolState,
   type RoutingStrategy,
 } from '@/utils/authPool';
+import { normalizeAuthIndex } from '@/utils/usage';
+import {
+  getAuthFileIcon,
+  getTypeColor,
+  getTypeLabel,
+  parsePriorityValue,
+  resolveAuthFileStats,
+  type QuotaProviderType,
+} from '@/features/authFiles/constants';
+import { formatModified } from '@/features/authFiles/constants';
+import { resolveAuthProvider } from '@/utils/quota';
+import { resolveCodexPlanType } from '@/utils/quota/resolvers';
 import styles from './AuthPoolPage.module.scss';
 
 const EMPTY_AUTH_POOL_STATE: AuthPoolState = {
@@ -36,6 +64,85 @@ const waitForHotReload = () =>
   });
 
 const readText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const resolvePlanType = (file: AuthFileItem): string =>
+  readText(file.plan_type) || readText(file.planType) || resolveCodexPlanType(file) || '';
+
+const resolveQuotaType = (file: AuthFileItem): QuotaProviderType | null => {
+  const provider = resolveAuthProvider(file);
+  if (provider === 'antigravity') return 'antigravity';
+  if (provider === 'claude') return 'claude';
+  if (provider === 'codex') return 'codex';
+  if (provider === 'gemini-cli') return 'gemini-cli';
+  if (provider === 'kimi') return 'kimi';
+  return null;
+};
+
+type QuotaStateLike =
+  | {
+      status?: string;
+      planType?: string | null;
+      tierLabel?: string | null;
+      creditBalance?: number | null;
+      windows?: Array<{ usedPercent?: number | null }>;
+      groups?: Array<{ remainingFraction?: number }>;
+      rows?: Array<{ used?: number; limit?: number }>;
+    }
+  | undefined;
+
+const formatQuotaSummary = (quotaType: QuotaProviderType | null, quota: QuotaStateLike): string => {
+  if (!quotaType || !quota || quota.status !== 'success') {
+    return '';
+  }
+
+  if (quotaType === 'codex') {
+    const planType = readText(quota.planType);
+    const usedPercent = quota.windows?.[0]?.usedPercent;
+    if (planType && typeof usedPercent === 'number') {
+      return `${planType} · ${Math.max(0, Math.round(100 - usedPercent))}%`;
+    }
+    if (planType) return planType;
+    if (typeof usedPercent === 'number') {
+      return `${Math.max(0, Math.round(100 - usedPercent))}%`;
+    }
+  }
+
+  if (quotaType === 'claude') {
+    const planType = readText(quota.planType);
+    const usedPercent = quota.windows?.[0]?.usedPercent;
+    if (planType && typeof usedPercent === 'number') {
+      return `${planType} · ${Math.max(0, Math.round(100 - usedPercent))}%`;
+    }
+    if (planType) return planType;
+    if (typeof usedPercent === 'number') {
+      return `${Math.max(0, Math.round(100 - usedPercent))}%`;
+    }
+  }
+
+  if (quotaType === 'gemini-cli') {
+    if (quota.tierLabel && typeof quota.creditBalance === 'number') {
+      return `${quota.tierLabel} · ${quota.creditBalance}`;
+    }
+    if (quota.tierLabel) return quota.tierLabel;
+    if (typeof quota.creditBalance === 'number') return String(quota.creditBalance);
+  }
+
+  if (quotaType === 'antigravity') {
+    const remainingFraction = quota.groups?.[0]?.remainingFraction;
+    if (typeof remainingFraction === 'number') {
+      return `${Math.round(Math.max(0, Math.min(1, remainingFraction)) * 100)}%`;
+    }
+  }
+
+  if (quotaType === 'kimi') {
+    const row = quota.rows?.[0];
+    if (row && typeof row.used === 'number' && typeof row.limit === 'number' && row.limit > 0) {
+      return `${row.used}/${row.limit}`;
+    }
+  }
+
+  return '';
+};
 
 const buildSearchText = (file: AuthFileItem): string =>
   [
@@ -59,8 +166,21 @@ export function AuthPoolPage() {
   const { t } = useTranslation();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const showNotification = useNotificationStore((state) => state.showNotification);
+  const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const config = useConfigStore((state) => state.config);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const keyStats = useUsageStatsStore((state) => state.keyStats);
+  const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats);
+  const antigravityQuota = useQuotaStore((state) => state.antigravityQuota);
+  const claudeQuota = useQuotaStore((state) => state.claudeQuota);
+  const codexQuota = useQuotaStore((state) => state.codexQuota);
+  const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);
+  const kimiQuota = useQuotaStore((state) => state.kimiQuota);
+  const setAntigravityQuota = useQuotaStore((state) => state.setAntigravityQuota);
+  const setClaudeQuota = useQuotaStore((state) => state.setClaudeQuota);
+  const setCodexQuota = useQuotaStore((state) => state.setCodexQuota);
+  const setGeminiCliQuota = useQuotaStore((state) => state.setGeminiCliQuota);
+  const setKimiQuota = useQuotaStore((state) => state.setKimiQuota);
 
   const [authPool, setAuthPool] = useState<AuthPoolState>(
     () => getAuthPoolStateFromConfig(config) ?? EMPTY_AUTH_POOL_STATE
@@ -76,7 +196,7 @@ export function AuthPoolPage() {
 
   const refreshAuthPool = useCallback(async () => {
     if (connectionStatus !== 'connected') {
-      setAuthPool(getAuthPoolStateFromConfig(config));
+      setAuthPool(getAuthPoolStateFromConfig(useConfigStore.getState().config));
       setCurrentPoolFiles([]);
       setLoading(false);
       return;
@@ -88,7 +208,6 @@ export function AuthPoolPage() {
       const [poolState, authFilesResponse] = await Promise.all([
         authPoolApi.getAuthPool(),
         authFilesApi.list(),
-        fetchConfig(undefined, true).catch(() => null),
       ]);
       setAuthPool(poolState);
       setCurrentPoolFiles(authFilesResponse?.files ?? []);
@@ -100,13 +219,123 @@ export function AuthPoolPage() {
     } finally {
       setLoading(false);
     }
-  }, [config, connectionStatus, fetchConfig, t]);
+  }, [connectionStatus, t]);
 
   useHeaderRefresh(refreshAuthPool);
 
   useEffect(() => {
     void refreshAuthPool();
   }, [refreshAuthPool]);
+
+  useEffect(() => {
+    if (connectionStatus === 'connected') {
+      return;
+    }
+    setAuthPool(getAuthPoolStateFromConfig(config) ?? EMPTY_AUTH_POOL_STATE);
+  }, [config, connectionStatus]);
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected') {
+      return;
+    }
+    void loadUsageStats().catch(() => {});
+  }, [connectionStatus, loadUsageStats]);
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected' || currentPoolFiles.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const scheduleFetch = <TState, TData>(
+      currentState: TState | undefined,
+      setter: (updater: (prev: Record<string, TState>) => Record<string, TState>) => void,
+      configEntry: {
+        buildLoadingState: () => TState;
+        buildSuccessState: (data: TData) => TState;
+        buildErrorState: (message: string, status?: number) => TState;
+        fetchQuota: (file: AuthFileItem, translate: TFunction) => Promise<TData>;
+      },
+      file: AuthFileItem
+    ) => {
+      const stateLike = currentState as QuotaStateLike;
+      if (stateLike?.status === 'loading' || stateLike?.status === 'success') {
+        return;
+      }
+
+      setter((prev: Record<string, TState>) => ({
+        ...prev,
+        [file.name]: configEntry.buildLoadingState(),
+      }));
+
+      void configEntry
+        .fetchQuota(file, t)
+        .then((data) => {
+          if (cancelled) return;
+          setter((prev: Record<string, TState>) => ({
+            ...prev,
+            [file.name]: configEntry.buildSuccessState(data),
+          }));
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : t('common.unknown_error');
+          const status =
+            err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+              ? err.status
+              : undefined;
+          setter((prev: Record<string, TState>) => ({
+            ...prev,
+            [file.name]: configEntry.buildErrorState(message, status),
+          }));
+        });
+    };
+
+    currentPoolFiles.forEach((file) => {
+      const quotaType = resolveQuotaType(file);
+      if (!quotaType || file.disabled === true) {
+        return;
+      }
+
+      switch (quotaType) {
+        case 'antigravity':
+          scheduleFetch(antigravityQuota[file.name], setAntigravityQuota, ANTIGRAVITY_CONFIG, file);
+          break;
+        case 'claude':
+          scheduleFetch(claudeQuota[file.name], setClaudeQuota, CLAUDE_CONFIG, file);
+          break;
+        case 'codex':
+          scheduleFetch(codexQuota[file.name], setCodexQuota, CODEX_CONFIG, file);
+          break;
+        case 'gemini-cli':
+          scheduleFetch(geminiCliQuota[file.name], setGeminiCliQuota, GEMINI_CLI_CONFIG, file);
+          break;
+        case 'kimi':
+          scheduleFetch(kimiQuota[file.name], setKimiQuota, KIMI_CONFIG, file);
+          break;
+        default:
+          break;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    antigravityQuota,
+    claudeQuota,
+    codexQuota,
+    connectionStatus,
+    currentPoolFiles,
+    geminiCliQuota,
+    kimiQuota,
+    setAntigravityQuota,
+    setClaudeQuota,
+    setCodexQuota,
+    setGeminiCliQuota,
+    setKimiQuota,
+    t,
+  ]);
 
   const currentDisplayPath = useMemo(() => resolveAuthPoolDisplayPath(authPool), [authPool]);
   const currentPathKey = useMemo(
@@ -140,7 +369,7 @@ export function AuthPoolPage() {
           path,
           currentDisplayPath || authPool.activePath || authPool.authDir
         );
-        const strategy = authPool.routingStrategyByPath[normalizedPath] ?? authPool.currentStrategy;
+        const strategy = authPool.routingStrategyByPath[normalizedPath] ?? 'round-robin';
         return {
           path,
           normalizedPath,
@@ -284,7 +513,37 @@ export function AuthPoolPage() {
     [t]
   );
 
+  const renderFileQuota = useCallback(
+    (file: AuthFileItem) => {
+      const quotaType = resolveQuotaType(file);
+      if (!quotaType) return '';
+
+      const quotaMap =
+        quotaType === 'antigravity'
+          ? antigravityQuota
+          : quotaType === 'claude'
+            ? claudeQuota
+            : quotaType === 'codex'
+              ? codexQuota
+              : quotaType === 'gemini-cli'
+                ? geminiCliQuota
+                : kimiQuota;
+
+      return formatQuotaSummary(quotaType, quotaMap[file.name] as QuotaStateLike);
+    },
+    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota]
+  );
+
   const totalFiles = currentPoolFiles.length;
+  const enabledFiles = useMemo(
+    () => currentPoolFiles.filter((file) => file.disabled !== true).length,
+    [currentPoolFiles]
+  );
+  const disabledFiles = totalFiles - enabledFiles;
+  const currentPoolName = useMemo(
+    () => getAuthPoolName(currentDisplayPath || authPool.activePath || authPool.authDir),
+    [authPool.activePath, authPool.authDir, currentDisplayPath]
+  );
   const hasSearch = search.trim().length > 0;
 
   return (
@@ -432,14 +691,44 @@ export function AuthPoolPage() {
               </Card>
 
               <Card
-                title={t('auth_pool.scope_card_title')}
+                title={t('auth_pool.status_card_title')}
                 extra={loading ? t('common.loading') : null}
               >
                 <div className={styles.cardSection}>
-                  <div className={styles.info}>{t('auth_pool.single_active_notice')}</div>
-                  <div className={styles.info}>{t('auth_pool.switch_effect_hint')}</div>
-                  <div className={styles.info}>{t('auth_pool.scope_usage_info')}</div>
-                  <div className={styles.info}>{t('auth_pool.scope_auth_files_info')}</div>
+                  <div className={styles.statusGrid}>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>{t('auth_pool.current_pool_name')}</div>
+                      <div className={styles.statusValue}>
+                        {currentPoolName || t('common.not_set')}
+                      </div>
+                    </div>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>{t('auth_pool.enabled_status')}</div>
+                      <div className={styles.statusValue}>{t('auth_pool.current_in_use')}</div>
+                    </div>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>{t('auth_pool.path_count')}</div>
+                      <div className={styles.statusValue}>{pathItems.length}</div>
+                    </div>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>
+                        {t('auth_pool.current_auth_files_count')}
+                      </div>
+                      <div className={styles.statusValue}>{totalFiles}</div>
+                    </div>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>
+                        {t('auth_pool.current_enabled_files')}
+                      </div>
+                      <div className={styles.statusValue}>{enabledFiles}</div>
+                    </div>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>
+                        {t('auth_pool.current_disabled_files')}
+                      </div>
+                      <div className={styles.statusValue}>{disabledFiles}</div>
+                    </div>
+                  </div>
                 </div>
               </Card>
             </div>
@@ -464,9 +753,72 @@ export function AuthPoolPage() {
                 <div className={styles.fileList}>
                   {filteredFiles.map((file) => (
                     <div key={file.name} className={styles.fileItem}>
-                      <div className={styles.fileCopy}>
-                        <div className={styles.fileName}>{file.name}</div>
-                        <div className={styles.fileMeta}>{renderFileMeta(file)}</div>
+                      <div className={styles.fileVisual}>
+                        <div
+                          className={styles.fileAvatar}
+                          style={{
+                            backgroundColor: getTypeColor(file.type || 'unknown', resolvedTheme).bg,
+                            color: getTypeColor(file.type || 'unknown', resolvedTheme).text,
+                            ...(getTypeColor(file.type || 'unknown', resolvedTheme).border
+                              ? {
+                                  border: getTypeColor(file.type || 'unknown', resolvedTheme)
+                                    .border,
+                                }
+                              : {}),
+                          }}
+                        >
+                          {getAuthFileIcon(file.type || 'unknown', resolvedTheme) ? (
+                            <img
+                              src={getAuthFileIcon(file.type || 'unknown', resolvedTheme) || ''}
+                              alt=""
+                              className={styles.fileAvatarImage}
+                            />
+                          ) : (
+                            <span className={styles.fileAvatarFallback}>
+                              {getTypeLabel(t, file.type || 'unknown')
+                                .slice(0, 1)
+                                .toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div className={styles.fileCopy}>
+                          <div className={styles.fileHeaderRow}>
+                            <div className={styles.fileName}>{file.name}</div>
+                            <div className={styles.badges}>
+                              <span className={styles.badge}>
+                                {getTypeLabel(t, file.type || 'unknown')}
+                              </span>
+                              {resolvePlanType(file) ? (
+                                <span className={styles.badge}>{resolvePlanType(file)}</span>
+                              ) : null}
+                              {parsePriorityValue(file.priority ?? file['priority']) !==
+                              undefined ? (
+                                <span className={styles.badge}>
+                                  P{parsePriorityValue(file.priority ?? file['priority'])}
+                                </span>
+                              ) : null}
+                              {renderFileQuota(file) ? (
+                                <span className={styles.badge}>{renderFileQuota(file)}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className={styles.fileMeta}>{renderFileMeta(file)}</div>
+                          <div className={styles.fileExtraMeta}>
+                            <span className={styles.fileExtraItem}>
+                              {t('auth_files.file_modified')}: {formatModified(file)}
+                            </span>
+                            {normalizeAuthIndex(file['auth_index'] ?? file.authIndex) ? (
+                              <span className={styles.fileExtraItem}>
+                                Auth #{normalizeAuthIndex(file['auth_index'] ?? file.authIndex)}
+                              </span>
+                            ) : null}
+                            <span className={styles.fileExtraItem}>
+                              {t('stats.success')}/{t('stats.failure')}:{' '}
+                              {resolveAuthFileStats(file, keyStats).success}/
+                              {resolveAuthFileStats(file, keyStats).failure}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                       <div className={styles.rowActions}>
                         {file.disabled === true ? (

@@ -6,7 +6,6 @@
 import type { GeminiKeyConfig, ProviderKeyConfig, OpenAIProviderConfig } from './provider';
 import type { AmpcodeConfig } from './ampcode';
 
-
 export interface AuthPoolConfig {
   enabled?: boolean;
   paths?: string[];
@@ -34,6 +33,7 @@ export interface Config {
   routingStrategy?: string;
   authPool?: AuthPoolConfig;
   apiKeys?: string[];
+  apiKeyAliases?: Record<string, string>;
   ampcode?: AmpcodeConfig;
   geminiApiKeys?: GeminiKeyConfig[];
   codexApiKeys?: ProviderKeyConfig[];
@@ -58,6 +58,7 @@ export type RawConfigSection =
   | 'routing/strategy'
   | 'auth-pool'
   | 'api-keys'
+  | 'api-key-aliases'
   | 'ampcode'
   | 'gemini-api-key'
   | 'codex-api-key'

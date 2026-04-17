@@ -152,21 +152,24 @@ const toOptionalString = (value: unknown): string | undefined => {
 const getDetailAuthIndexRaw = (detailRecord: Record<string, unknown> | null | undefined): unknown =>
   getDetailField(detailRecord, ['auth_index', 'authIndex', 'AuthIndex']);
 
-const getDetailAuthID = (detailRecord: Record<string, unknown> | null | undefined): string | undefined =>
+const getDetailAuthID = (
+  detailRecord: Record<string, unknown> | null | undefined
+): string | undefined =>
   toOptionalString(getDetailField(detailRecord, ['auth_id', 'authId', 'AuthID']));
 
-const getDetailPoolType = (detailRecord: Record<string, unknown> | null | undefined): string | undefined =>
+const getDetailPoolType = (
+  detailRecord: Record<string, unknown> | null | undefined
+): string | undefined =>
   toOptionalString(getDetailField(detailRecord, ['pool_type', 'poolType', 'PoolType']));
 
-const getDetailPlanType = (detailRecord: Record<string, unknown> | null | undefined): string | undefined =>
+const getDetailPlanType = (
+  detailRecord: Record<string, unknown> | null | undefined
+): string | undefined =>
   toOptionalString(getDetailField(detailRecord, ['plan_type', 'planType', 'PlanType']));
 
 const cloneDefaultCodexPrices = (): Record<string, ModelPrice> =>
   Object.fromEntries(
-    Object.entries(DEFAULT_CODEX_MODEL_PRICES).map(([model, price]) => [
-      model,
-      { ...price },
-    ])
+    Object.entries(DEFAULT_CODEX_MODEL_PRICES).map(([model, price]) => [model, { ...price }])
   ) as Record<string, ModelPrice>;
 
 const getApisRecord = (usageData: unknown): Record<string, unknown> | null => {
@@ -303,10 +306,7 @@ export function filterUsageByTimeRange<T>(
   } as T;
 }
 
-export function filterUsageByAuthIndexes<T>(
-  usageData: T,
-  authIndexes: Set<string>
-): T {
+export function filterUsageByAuthIndexes<T>(usageData: T, authIndexes: Set<string>): T {
   const usageRecord = isRecord(usageData) ? usageData : null;
   const apis = getApisRecord(usageData);
   if (!usageRecord || !apis) {
@@ -1047,11 +1047,20 @@ export function saveModelPrices(prices: Record<string, ModelPrice>): void {
  */
 export function getApiStats(
   usageData: unknown,
-  modelPrices: Record<string, ModelPrice>
+  modelPrices: Record<string, ModelPrice>,
+  apiKeyAliases: Record<string, string> = {}
 ): ApiStats[] {
   const apis = getApisRecord(usageData);
   if (!apis) return [];
   const result: ApiStats[] = [];
+
+  const resolveAPIBucketLabel = (endpoint: string): string => {
+    const alias = typeof apiKeyAliases[endpoint] === 'string' ? apiKeyAliases[endpoint].trim() : '';
+    if (alias) {
+      return alias;
+    }
+    return maskUsageSensitiveValue(endpoint) || endpoint;
+  };
 
   Object.entries(apis).forEach(([endpoint, apiData]) => {
     if (!isRecord(apiData)) return;
@@ -1118,7 +1127,7 @@ export function getApiStats(
       : derivedFailureCount;
 
     result.push({
-      endpoint: maskUsageSensitiveValue(endpoint) || endpoint,
+      endpoint: resolveAPIBucketLabel(endpoint),
       totalRequests: Number(apiData.total_requests) || 0,
       successCount,
       failureCount,

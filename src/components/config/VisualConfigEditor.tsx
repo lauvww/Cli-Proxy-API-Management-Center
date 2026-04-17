@@ -306,6 +306,10 @@ export function VisualConfigEditor({
     (apiKeysText: string) => onChange({ apiKeysText }),
     [onChange]
   );
+  const handleAPIKeyAliasesChange = useCallback(
+    (apiKeyAliases: Record<string, string>) => onChange({ apiKeyAliases }),
+    [onChange]
+  );
   const handlePayloadDefaultRulesChange = useCallback(
     (payloadDefaultRules: PayloadRule[]) => onChange({ payloadDefaultRules }),
     [onChange]
@@ -857,13 +861,6 @@ export function VisualConfigEditor({
             description={t('config_management.visual.sections.auth.description')}
           >
             <SectionStack>
-              <ToggleRow
-                title={t('config_management.visual.sections.auth.auth_pool_mode')}
-                description={t('config_management.visual.sections.auth.auth_pool_mode_desc')}
-                checked={values.authPoolEnabled}
-                disabled={disabled}
-                onChange={(authPoolEnabled) => onChange({ authPoolEnabled })}
-              />
               <Input
                 label={t('config_management.visual.sections.auth.auth_dir')}
                 placeholder="~/.cli-proxy-api"
@@ -876,11 +873,7 @@ export function VisualConfigEditor({
                     : t('config_management.visual.sections.auth.auth_dir_hint')
                 }
               />
-              {values.authPoolEnabled ? (
-                <div className={styles.emptyState}>
-                  {t('config_management.visual.sections.auth.auth_pool_page_hint')}
-                </div>
-              ) : (
+              {!values.authPoolEnabled ? (
                 <SectionSubsection
                   title={t('config_management.visual.sections.auth.auth_pool_title')}
                   description={t('config_management.visual.sections.auth.auth_pool_desc')}
@@ -953,12 +946,14 @@ export function VisualConfigEditor({
                     </div>
                   )}
                 </SectionSubsection>
-              )}
+              ) : null}
               <div className={styles.subsection}>
                 <ApiKeysCardEditor
                   value={values.apiKeysText}
+                  aliases={values.apiKeyAliases}
                   disabled={disabled}
                   onChange={handleApiKeysTextChange}
+                  onAliasesChange={handleAPIKeyAliasesChange}
                 />
               </div>
             </SectionStack>
@@ -1003,6 +998,13 @@ export function VisualConfigEditor({
                   checked={values.usageStatisticsEnabled}
                   disabled={disabled}
                   onChange={(usageStatisticsEnabled) => onChange({ usageStatisticsEnabled })}
+                />
+                <ToggleRow
+                  title={t('config_management.visual.sections.auth.auth_pool_mode')}
+                  description={t('config_management.visual.sections.auth.auth_pool_mode_desc')}
+                  checked={values.authPoolEnabled}
+                  disabled={disabled}
+                  onChange={(authPoolEnabled) => onChange({ authPoolEnabled })}
                 />
               </SectionGrid>
 

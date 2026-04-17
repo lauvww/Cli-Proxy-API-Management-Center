@@ -16,7 +16,56 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
   return value as Record<string, unknown>;
 };
 
-const hasWindowsDrivePrefix = (value: string): boolean => /^[a-zA-Z]:/.test(value);
+const hasWindowsDrivePrefix = (value: string): boolean =>
+  value.length >= 2 && /^[a-zA-Z]$/.test(value[0] ?? '') && value[1] === ':';
+
+const isWindowsDriveRoot = (value: string): boolean =>
+  value.length === 2 && hasWindowsDrivePrefix(value);
+
+const isWindowsStyleKey = (value: string): boolean =>
+  hasWindowsDrivePrefix(value) || value.startsWith('//');
+
+const shouldUseWindowsSeparators = (original: string, cleaned: string): boolean =>
+  original.includes('\\') || hasWindowsDrivePrefix(original) || hasWindowsDrivePrefix(cleaned);
+
+const cleanSegments = (segments: string[], allowLeadingParents: boolean): string[] => {
+  const stack: string[] = [];
+
+  segments.forEach((segment) => {
+    if (!segment || segment === '.') {
+      return;
+    }
+
+    if (segment === '..') {
+      if (stack.length > 0 && stack[stack.length - 1] !== '..') {
+        stack.pop();
+        return;
+      }
+      if (allowLeadingParents) {
+        stack.push('..');
+      }
+      return;
+    }
+
+    stack.push(segment);
+  });
+
+  return stack;
+};
+
+const cleanRelativePath = (value: string): string =>
+  cleanSegments(value.split('/'), false).join('/');
+
+const cleanNormalPath = (value: string): string => {
+  const isAbsolute = value.startsWith('/');
+  const cleaned = cleanSegments(value.split('/'), !isAbsolute).join('/');
+
+  if (!cleaned) {
+    return isAbsolute ? '/' : '.';
+  }
+
+  return isAbsolute ? `/${cleaned}` : cleaned;
+};
 
 const cleanSlashPath = (value: string): string => {
   if (!value) return '';
@@ -25,50 +74,25 @@ const cleanSlashPath = (value: string): string => {
     const prefix = value.slice(0, 2);
     const remainder = value.slice(2).replace(/^\/+/, '');
     if (!remainder) return `${prefix}/`;
-    const segments = remainder.split('/').filter(Boolean);
-    const stack: string[] = [];
-    segments.forEach((segment) => {
-      if (segment === '.' || segment === '') return;
-      if (segment === '..') {
-        if (stack.length > 0 && stack[stack.length - 1] !== '..') {
-          stack.pop();
-          return;
-        }
-        return;
-      }
-      stack.push(segment);
-    });
-    return `${prefix}/${stack.join('/')}`.replace(/\/+$/, stack.length === 0 ? '/' : '');
+    const cleaned = cleanRelativePath(remainder);
+    if (!cleaned) return `${prefix}/`;
+    return `${prefix}/${cleaned}`;
   }
 
-  const isUnc = value.startsWith('//');
-  const segments = value.split('/').filter(Boolean);
-  const stack: string[] = [];
-
-  segments.forEach((segment) => {
-    if (segment === '.' || segment === '') return;
-    if (segment === '..') {
-      if (stack.length > 0 && stack[stack.length - 1] !== '..') {
-        stack.pop();
-        return;
-      }
-      if (!isUnc) {
-        stack.push(segment);
-      }
-      return;
+  if (value.startsWith('//')) {
+    const trimmed = value.replace(/^\/+/, '');
+    const parts = trimmed.split('/');
+    if (parts.length >= 2) {
+      const prefix = `//${parts[0]}/${parts[1]}`;
+      const remainder = parts.slice(2).join('/');
+      if (!remainder) return prefix;
+      const cleaned = cleanRelativePath(remainder);
+      if (!cleaned) return prefix;
+      return `${prefix}/${cleaned}`;
     }
-    stack.push(segment);
-  });
-
-  if (isUnc) {
-    if (stack.length === 0) return '//';
-    if (stack.length === 1) return `//${stack[0]}`;
-    return `//${stack.join('/')}`;
   }
 
-  return (
-    `${value.startsWith('/') ? '/' : ''}${stack.join('/')}` || (value.startsWith('/') ? '/' : '')
-  );
+  return cleanNormalPath(value);
 };
 
 export const normalizePathForCompare = (value: string): string =>
@@ -76,7 +100,7 @@ export const normalizePathForCompare = (value: string): string =>
     const normalized = normalizePathForDisplay(value);
     if (!normalized) return '';
     const key = normalized === '/' ? '/' : normalized.replace(/\\/g, '/').replace(/\/+$/, '');
-    if (hasWindowsDrivePrefix(key) || key.startsWith('//')) {
+    if (isWindowsStyleKey(key)) {
       return key.toLowerCase();
     }
     return key;
@@ -87,18 +111,14 @@ export const normalizePathForDisplay = (value: string): string =>
     const trimmed = value.trim();
     if (!trimmed) return '';
 
-    const slashNormalized = trimmed.replace(/\\/g, '/').replace(/\/+/g, '/');
+    const slashNormalized = trimmed.replace(/\\/g, '/');
     const cleaned = cleanSlashPath(slashNormalized);
-    if (!cleaned) return '';
+    if (!cleaned || cleaned === '.') return '';
 
-    if (
-      trimmed.includes('\\') ||
-      hasWindowsDrivePrefix(trimmed) ||
-      hasWindowsDrivePrefix(cleaned)
-    ) {
+    if (shouldUseWindowsSeparators(trimmed, cleaned)) {
       const windowsPath = cleaned.replace(/\//g, '\\');
-      if (/^[a-zA-Z]:\\?$/.test(windowsPath)) {
-        return `${windowsPath.replace(/\\?$/, '')}\\`;
+      if (isWindowsDriveRoot(windowsPath)) {
+        return `${windowsPath}\\`;
       }
       return windowsPath.replace(/\\+$/, '');
     }
@@ -223,4 +243,19 @@ export const resolveAuthPoolDisplayPath = (
     state.paths.find((item) => authPoolPathsEqual(item, target)) ??
     normalizePathForDisplay(path ?? state.activePath ?? state.authDir)
   );
+};
+
+export const getAuthPoolName = (path: string): string => {
+  const normalized = normalizePathForDisplay(path);
+  if (!normalized) return '';
+
+  const slashPath = normalized.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!slashPath) return '';
+
+  const lastSlashIndex = slashPath.lastIndexOf('/');
+  if (lastSlashIndex < 0) {
+    return slashPath;
+  }
+
+  return slashPath.slice(lastSlashIndex + 1);
 };
