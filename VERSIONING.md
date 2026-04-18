@@ -27,4 +27,4 @@ This UI repository follows the backend fork version.
 3. Commit the version bump
 4. Run `npm run build`
 5. Publish `management.html`
-6. When you want the update checker to prefer GitHub releases, create a matching Git tag and release such as `v1.1.0`
+6. When you want the update checker to prefer GitHub releases, create a matching Git tag and release such as `v1.1.1`
