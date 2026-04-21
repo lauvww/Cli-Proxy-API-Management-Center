@@ -12,6 +12,8 @@ This UI repository follows the backend fork version.
 
 - Stable release tag: `vX.Y.Z`
 - Optional pre-release tag: `vX.Y.Z-rc.N`
+- The current coordinated major line is `2.x`
+- The management UI should follow the backend fork major version unless a release note explicitly documents a compatibility exception
 
 ## Build behavior
 
@@ -27,4 +29,9 @@ This UI repository follows the backend fork version.
 3. Commit the version bump
 4. Run `npm run build`
 5. Publish `management.html`
-6. When you want the update checker to prefer GitHub releases, create a matching Git tag and release such as `v1.1.1`
+6. When you want the update checker to prefer GitHub releases, create a matching Git tag and release such as `v2.0.0`
+
+## Notes
+
+- For coordinated releases, update the backend `VERSION`, frontend `VERSION`, and frontend `package.json` together.
+- The Config page now depends on runtime metadata returned by the backend for features such as remote model catalog refresh overrides and live auth-index mapping, so documentation and release notes should assume matched backend and UI versions.

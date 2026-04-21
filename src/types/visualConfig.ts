@@ -5,6 +5,9 @@ export type PayloadParamValidationErrorCode =
   | 'payload_invalid_json';
 
 export type VisualConfigFieldPath =
+  | 'sessionAffinity'
+  | 'sessionAffinityTtl'
+  | 'modelCatalogRemoteRefreshEnabled'
   | 'port'
   | 'logsMaxTotalSizeMb'
   | 'requestRetry'
@@ -80,6 +83,9 @@ export type VisualConfigValues = {
   quotaSwitchPreviewModel: boolean;
   quotaAntigravityCredits: boolean;
   routingStrategy: 'round-robin' | 'fill-first';
+  sessionAffinity: boolean;
+  sessionAffinityTtl: string;
+  modelCatalogRemoteRefreshEnabled: boolean;
   wsAuth: boolean;
   payloadDefaultRules: PayloadRule[];
   payloadDefaultRawRules: PayloadRule[];
@@ -122,6 +128,9 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
   quotaSwitchPreviewModel: true,
   quotaAntigravityCredits: true,
   routingStrategy: 'round-robin',
+  sessionAffinity: false,
+  sessionAffinityTtl: '',
+  modelCatalogRemoteRefreshEnabled: false,
   wsAuth: false,
   payloadDefaultRules: [],
   payloadDefaultRawRules: [],

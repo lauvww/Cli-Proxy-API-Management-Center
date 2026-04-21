@@ -19,6 +19,12 @@ export interface QuotaExceededConfig {
   antigravityCredits?: boolean;
 }
 
+export interface ModelCatalogConfig {
+  remoteRefreshEnabled?: boolean;
+  remoteRefreshEffective?: boolean;
+  remoteRefreshForcedByCli?: string;
+}
+
 export interface Config {
   debug?: boolean;
   proxyUrl?: string;
@@ -31,6 +37,9 @@ export interface Config {
   wsAuth?: boolean;
   forceModelPrefix?: boolean;
   routingStrategy?: string;
+  sessionAffinity?: boolean;
+  sessionAffinityTtl?: string;
+  modelCatalog?: ModelCatalogConfig;
   authPool?: AuthPoolConfig;
   apiKeys?: string[];
   apiKeyAliases?: Record<string, string>;
@@ -55,6 +64,7 @@ export type RawConfigSection =
   | 'logs-max-total-size-mb'
   | 'ws-auth'
   | 'force-model-prefix'
+  | 'model-catalog'
   | 'routing/strategy'
   | 'auth-pool'
   | 'api-keys'

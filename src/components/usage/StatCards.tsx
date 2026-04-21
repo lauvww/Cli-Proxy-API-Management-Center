@@ -60,10 +60,11 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
 
   const hasPrices = Object.keys(modelPrices).length > 0;
 
-  const { tokenBreakdown, rateStats, totalCost, latencyStats } = useMemo(() => {
+  const { tokenBreakdown, rateStats, historyRateStats, totalCost, latencyStats } = useMemo(() => {
     const empty = {
       tokenBreakdown: { cachedTokens: 0, reasoningTokens: 0 },
       rateStats: { rpm: 0, tpm: 0, windowMinutes: 30, requestCount: 0, tokenCount: 0 },
+      historyRateStats: { rpm: 0, tpm: 0, windowMinutes: 0, requestCount: 0, tokenCount: 0 },
       totalCost: 0,
       latencyStats: {
         averageMs: null as number | null,
@@ -85,6 +86,8 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
     const now = nowMs;
     const windowMinutes = 30;
     const windowStart = now - windowMinutes * 60 * 1000;
+    let minTimestamp = Number.POSITIVE_INFINITY;
+    let maxTimestamp = 0;
     let requestCount = 0;
     let tokenCount = 0;
     const hasValidNow = Number.isFinite(now) && now > 0;
@@ -100,6 +103,10 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
       }
 
       const timestamp = detail.__timestampMs ?? 0;
+      if (Number.isFinite(timestamp) && timestamp > 0) {
+        minTimestamp = Math.min(minTimestamp, timestamp);
+        maxTimestamp = Math.max(maxTimestamp, timestamp);
+      }
       if (
         hasValidNow &&
         Number.isFinite(timestamp) &&
@@ -116,6 +123,15 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
     });
 
     const denominator = windowMinutes > 0 ? windowMinutes : 1;
+    const historyWindowMinutes =
+      Number.isFinite(minTimestamp) && maxTimestamp > 0 && maxTimestamp >= minTimestamp
+        ? Math.max((maxTimestamp - minTimestamp) / 60000, 1)
+        : 0;
+    const totalRequests = Number(usage?.total_requests) || details.length;
+    const totalTokens =
+      Number(usage?.total_tokens) ||
+      details.reduce((sum, detail) => sum + extractTotalTokens(detail), 0);
+
     return {
       tokenBreakdown: { cachedTokens, reasoningTokens },
       rateStats: {
@@ -124,6 +140,13 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
         windowMinutes,
         requestCount,
         tokenCount,
+      },
+      historyRateStats: {
+        rpm: historyWindowMinutes > 0 ? totalRequests / historyWindowMinutes : 0,
+        tpm: historyWindowMinutes > 0 ? totalTokens / historyWindowMinutes : 0,
+        windowMinutes: historyWindowMinutes,
+        requestCount: totalRequests,
+        tokenCount: totalTokens,
       },
       totalCost,
       latencyStats,
@@ -188,12 +211,19 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
       accent: '#22c55e',
       accentSoft: 'rgba(34, 197, 94, 0.18)',
       accentBorder: 'rgba(34, 197, 94, 0.32)',
-      value: loading ? '-' : formatPerMinuteValue(rateStats.rpm),
+      value: loading
+        ? '-'
+        : formatPerMinuteValue(rateStats.requestCount > 0 ? rateStats.rpm : historyRateStats.rpm),
       meta: (
-        <span className={styles.statMetaItem}>
-          {t('usage_stats.total_requests')}:{' '}
-          {loading ? '-' : rateStats.requestCount.toLocaleString()}
-        </span>
+        <>
+          <span className={styles.statMetaItem}>
+            {t('usage_stats.total_requests')}:{' '}
+            {loading ? '-' : (usage?.total_requests ?? 0).toLocaleString()}
+          </span>
+          <span className={`${styles.statMetaItem} ${styles.statSubtle}`}>
+            30m: {loading ? '-' : rateStats.requestCount.toLocaleString()}
+          </span>
+        </>
       ),
       trend: sparklines.rpm,
     },
@@ -204,12 +234,19 @@ export function StatCards({ usage, loading, modelPrices, nowMs, sparklines }: St
       accent: '#f97316',
       accentSoft: 'rgba(249, 115, 22, 0.18)',
       accentBorder: 'rgba(249, 115, 22, 0.32)',
-      value: loading ? '-' : formatPerMinuteValue(rateStats.tpm),
+      value: loading
+        ? '-'
+        : formatPerMinuteValue(rateStats.tokenCount > 0 ? rateStats.tpm : historyRateStats.tpm),
       meta: (
-        <span className={styles.statMetaItem}>
-          {t('usage_stats.total_tokens')}:{' '}
-          {loading ? '-' : formatCompactNumber(rateStats.tokenCount)}
-        </span>
+        <>
+          <span className={styles.statMetaItem}>
+            {t('usage_stats.total_tokens')}:{' '}
+            {loading ? '-' : formatCompactNumber(usage?.total_tokens ?? 0)}
+          </span>
+          <span className={`${styles.statMetaItem} ${styles.statSubtle}`}>
+            30m: {loading ? '-' : formatCompactNumber(rateStats.tokenCount)}
+          </span>
+        </>
       ),
       trend: sparklines.tpm,
     },

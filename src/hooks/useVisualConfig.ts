@@ -701,6 +701,25 @@ function getNextDirtyFields(
   if (Object.prototype.hasOwnProperty.call(patch, 'routingStrategy')) {
     updateDirty('routingStrategy', nextValues.routingStrategy === baselineValues.routingStrategy);
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'sessionAffinity')) {
+    updateDirty(
+      'sessionAffinity',
+      nextValues.sessionAffinity === baselineValues.sessionAffinity
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'sessionAffinityTtl')) {
+    updateDirty(
+      'sessionAffinityTtl',
+      nextValues.sessionAffinityTtl === baselineValues.sessionAffinityTtl
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'modelCatalogRemoteRefreshEnabled')) {
+    updateDirty(
+      'modelCatalogRemoteRefreshEnabled',
+      nextValues.modelCatalogRemoteRefreshEnabled ===
+        baselineValues.modelCatalogRemoteRefreshEnabled
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'payloadDefaultRules')) {
     updateDirty(
       'payloadDefaultRules',
@@ -837,6 +856,7 @@ export function useVisualConfig() {
       const remoteManagement = asRecord(parsed['remote-management']);
       const quotaExceeded = asRecord(parsed['quota-exceeded']);
       const routing = asRecord(parsed.routing);
+      const modelCatalog = asRecord(parsed['model-catalog']);
       const payload = asRecord(parsed.payload);
       const streaming = asRecord(parsed.streaming);
 
@@ -889,6 +909,14 @@ export function useVisualConfig() {
         quotaAntigravityCredits: Boolean(quotaExceeded?.['antigravity-credits'] ?? true),
 
         routingStrategy: routing?.strategy === 'fill-first' ? 'fill-first' : 'round-robin',
+        sessionAffinity: Boolean(
+          routing?.['session-affinity'] ?? routing?.['claude-code-session-affinity']
+        ),
+        sessionAffinityTtl:
+          typeof routing?.['session-affinity-ttl'] === 'string'
+            ? routing['session-affinity-ttl']
+            : '',
+        modelCatalogRemoteRefreshEnabled: Boolean(modelCatalog?.['remote-refresh-enabled']),
 
         payloadDefaultRules: parsePayloadRules(payload?.default),
         payloadDefaultRawRules: parseRawPayloadRules(payload?.['default-raw']),
@@ -1014,10 +1042,35 @@ export function useVisualConfig() {
           deleteIfMapEmpty(doc, ['quota-exceeded']);
         }
 
-        if (docHas(doc, ['routing']) || values.routingStrategy !== 'round-robin') {
+        if (
+          docHas(doc, ['routing']) ||
+          values.routingStrategy !== 'round-robin' ||
+          values.sessionAffinity ||
+          values.sessionAffinityTtl.trim()
+        ) {
           ensureMapInDoc(doc, ['routing']);
           doc.setIn(['routing', 'strategy'], values.routingStrategy);
+          doc.setIn(['routing', 'session-affinity'], values.sessionAffinity);
+          if (docHas(doc, ['routing', 'claude-code-session-affinity'])) {
+            doc.deleteIn(['routing', 'claude-code-session-affinity']);
+          }
+          const sessionAffinityTtl = values.sessionAffinityTtl.trim();
+          if (sessionAffinityTtl) {
+            doc.setIn(['routing', 'session-affinity-ttl'], sessionAffinityTtl);
+          } else if (docHas(doc, ['routing', 'session-affinity-ttl'])) {
+            doc.deleteIn(['routing', 'session-affinity-ttl']);
+          }
           deleteIfMapEmpty(doc, ['routing']);
+        }
+
+        if (docHas(doc, ['model-catalog']) || values.modelCatalogRemoteRefreshEnabled) {
+          ensureMapInDoc(doc, ['model-catalog']);
+          setBooleanInDoc(
+            doc,
+            ['model-catalog', 'remote-refresh-enabled'],
+            values.modelCatalogRemoteRefreshEnabled
+          );
+          deleteIfMapEmpty(doc, ['model-catalog']);
         }
 
         const keepaliveSeconds =

@@ -44,6 +44,7 @@ const SECTION_KEYS: RawConfigSection[] = [
   'logs-max-total-size-mb',
   'ws-auth',
   'force-model-prefix',
+  'model-catalog',
   'routing/strategy',
   'api-keys',
   'ampcode',
@@ -78,6 +79,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
       return config.wsAuth;
     case 'force-model-prefix':
       return config.forceModelPrefix;
+    case 'model-catalog':
+      return config.modelCatalog;
     case 'routing/strategy':
       return config.routingStrategy;
     case 'api-keys':
@@ -219,6 +222,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
           break;
         case 'force-model-prefix':
           nextConfig.forceModelPrefix = value as Config['forceModelPrefix'];
+          break;
+        case 'model-catalog':
+          nextConfig.modelCatalog = value as Config['modelCatalog'];
           break;
         case 'routing/strategy':
           nextConfig.routingStrategy = value as Config['routingStrategy'];

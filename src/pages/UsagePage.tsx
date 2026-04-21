@@ -51,6 +51,7 @@ import {
   getAuthPoolStateFromConfig,
   normalizePathForCompare,
   normalizePathForDisplay,
+  pathIsWithinScope,
   resolveAuthPoolDisplayPath,
   type AuthPoolState,
 } from '@/utils/authPool';
@@ -518,7 +519,7 @@ export function UsagePage() {
       const inSelectedPool = getAuthFilePathCandidates(file).some((candidatePath) => {
         const directory = normalizePathForCompare(resolveAuthFileDirectory(candidatePath));
         if (!directory) return false;
-        return directory === selectedPoolPath || directory.startsWith(`${selectedPoolPath}\\`);
+        return pathIsWithinScope(directory, selectedPoolPath);
       });
 
       if (inSelectedPool) {
@@ -550,6 +551,24 @@ export function UsagePage() {
     currentAuthPoolDisplayPath,
     resolvedPoolFilter,
   ]);
+  useEffect(() => {
+    if (!authPoolState.enabled || !isPathPoolFilter(resolvedPoolFilter)) {
+      return;
+    }
+
+    const normalizedPath = normalizePathForCompare(
+      resolvedPoolFilter.slice(PATH_POOL_FILTER_PREFIX.length)
+    );
+    if (!normalizedPath) {
+      setPoolFilter('current');
+      return;
+    }
+
+    const exists = discoveredPoolPaths.some((entry) => entry.normalized === normalizedPath);
+    if (!exists) {
+      setPoolFilter('current');
+    }
+  }, [authPoolState.enabled, discoveredPoolPaths, resolvedPoolFilter]);
   const poolPathOptions = useMemo(
     () =>
       discoveredPoolPaths.map((entry) => ({
@@ -560,12 +579,16 @@ export function UsagePage() {
   );
   const poolFilterOptions = useMemo(() => {
     const options: Array<{ value: UsagePoolFilter; label: string }> = [];
+    const currentPoolLabel = t('usage_stats.pool_current');
+    const currentPoolPath =
+      effectiveCurrentAuthPoolDisplayPath ||
+      currentAuthPoolDisplayPath ||
+      authPoolState.activePath ||
+      authPoolState.authDir ||
+      (typeof usageMeta.current_auth_pool === 'string' ? usageMeta.current_auth_pool.trim() : '');
 
-    if (
-      authPoolState.enabled &&
-      (currentAuthPoolDisplayPath || authPoolState.activePath || authPoolState.authDir)
-    ) {
-      options.push({ value: 'current', label: t('usage_stats.pool_current') });
+    if (authPoolState.enabled && currentPoolPath) {
+      options.push({ value: 'current', label: currentPoolLabel });
     }
 
     poolPathOptions.forEach((option) => {
@@ -573,14 +596,24 @@ export function UsagePage() {
     });
 
     options.push({ value: 'all', label: t('usage_stats.pool_all') });
-    return options;
+
+    const deduped = new Map<UsagePoolFilter, string>();
+    options.forEach((option) => {
+      if (!deduped.has(option.value)) {
+        deduped.set(option.value, option.label);
+      }
+    });
+
+    return Array.from(deduped.entries()).map(([value, label]) => ({ value, label }));
   }, [
+    authPoolState.enabled,
     authPoolState.activePath,
     authPoolState.authDir,
-    authPoolState.enabled,
     currentAuthPoolDisplayPath,
+    effectiveCurrentAuthPoolDisplayPath,
     poolPathOptions,
     t,
+    usageMeta.current_auth_pool,
   ]);
 
   const filteredUsage = useMemo(
@@ -755,6 +788,13 @@ export function UsagePage() {
     [poolFilterOptions, resolvedPoolFilter, t]
   );
   const quickPoolFilterOptions = poolFilterOptions;
+  const autoRefreshHint = useMemo(
+    () =>
+      t('usage_stats.auto_refresh_hint', {
+        seconds: Math.round(USAGE_AUTO_REFRESH_MS / 1000),
+      }),
+    [t]
+  );
 
   return (
     <div className={styles.container}>
@@ -833,6 +873,7 @@ export function UsagePage() {
               {t('usage_stats.last_updated')}: {lastRefreshedAt.toLocaleTimeString()}
             </span>
           )}
+          <span className={styles.lastRefreshed}>{autoRefreshHint}</span>
         </div>
       </div>
 

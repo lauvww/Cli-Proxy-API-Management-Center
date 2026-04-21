@@ -44,6 +44,7 @@ export function ConfigPage() {
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
+  const modelCatalogRuntime = useConfigStore((state) => state.config?.modelCatalog);
   const isMobile = useMediaQuery('(max-width: 768px)');
 
   const {
@@ -95,6 +96,11 @@ export function ConfigPage() {
     setError('');
     try {
       const data = await configFileApi.fetchConfigYaml();
+      try {
+        await useConfigStore.getState().fetchConfig(undefined, true);
+      } catch {
+        // Keep YAML editing available even if the runtime snapshot request fails.
+      }
       setContent(data);
       setDirty(false);
       setDiffModalOpen(false);
@@ -618,6 +624,7 @@ export function ConfigPage() {
               values={visualValues}
               validationErrors={visualValidationErrors}
               hasPayloadValidationErrors={visualHasPayloadValidationErrors}
+              modelCatalogRuntime={modelCatalogRuntime}
               disabled={disableControls || loading}
               onChange={handleVisualValuesChange}
             />

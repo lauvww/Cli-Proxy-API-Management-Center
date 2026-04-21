@@ -98,6 +98,12 @@ const normalizePrefix = (value: unknown): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
+const normalizeAuthIndexField = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = String(value).trim();
+  return trimmed ? trimmed : undefined;
+};
+
 const normalizeStringMap = (input: unknown): Record<string, string> | undefined => {
   if (!isRecord(input)) return undefined;
 
@@ -122,10 +128,14 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
   if (!trimmed) return null;
 
   const proxyUrl = record ? (record['proxy-url'] ?? record.proxyUrl) : undefined;
+  const authIndex = record
+    ? normalizeAuthIndexField(record['auth-index'] ?? record.authIndex ?? record.auth_index)
+    : undefined;
   const headers = record ? normalizeHeaders(record.headers) : undefined;
 
   return {
     apiKey: trimmed,
+    authIndex,
     proxyUrl: proxyUrl ? String(proxyUrl) : undefined,
     headers,
   };
@@ -139,6 +149,10 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
   if (!trimmed) return null;
 
   const config: ProviderKeyConfig = { apiKey: trimmed };
+  const authIndex = normalizeAuthIndexField(
+    record?.['auth-index'] ?? record?.authIndex ?? record?.auth_index
+  );
+  if (authIndex) config.authIndex = authIndex;
   const priority = record?.priority ?? record?.['priority'];
   if (priority !== undefined && priority !== null && String(priority).trim() !== '') {
     const parsed = Number(priority);
@@ -204,6 +218,10 @@ const normalizeGeminiKeyConfig = (item: unknown): GeminiKeyConfig | null => {
   if (!trimmed) return null;
 
   const config: GeminiKeyConfig = { apiKey: trimmed };
+  const authIndex = normalizeAuthIndexField(
+    record?.['auth-index'] ?? record?.authIndex ?? record?.auth_index
+  );
+  if (authIndex) config.authIndex = authIndex;
   const priority = record?.priority ?? record?.['priority'];
   if (priority !== undefined && priority !== null && String(priority).trim() !== '') {
     const parsed = Number(priority);
@@ -257,6 +275,10 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
     baseUrl: String(baseUrl),
     apiKeyEntries,
   };
+  const authIndex = normalizeAuthIndexField(
+    provider['auth-index'] ?? provider.authIndex ?? provider.auth_index
+  );
+  if (authIndex) result.authIndex = authIndex;
 
   const prefix = normalizePrefix(provider.prefix ?? provider['prefix']);
   if (prefix) result.prefix = prefix;
@@ -367,6 +389,44 @@ const normalizeAuthPoolConfig = (payload: unknown) => {
   };
 };
 
+const normalizeModelCatalogConfig = (payload: unknown) => {
+  if (!isRecord(payload)) return undefined;
+  const source = isRecord(payload['model-catalog'])
+    ? (payload['model-catalog'] as Record<string, unknown>)
+    : payload;
+  if (!isRecord(source)) return undefined;
+
+  const remoteRefreshEnabled = normalizeBoolean(
+    source['remote-refresh-enabled'] ??
+      source.remoteRefreshEnabled ??
+      source['remote_refresh_enabled']
+  );
+  const remoteRefreshEffective = normalizeBoolean(
+    source['remote-refresh-effective'] ??
+      source.remoteRefreshEffective ??
+      source['remote_refresh_effective']
+  );
+  const remoteRefreshForcedByCli = normalizeAuthIndexField(
+    source['remote-refresh-forced-by-cli'] ??
+      source.remoteRefreshForcedByCli ??
+      source['remote_refresh_forced_by_cli']
+  );
+
+  if (
+    remoteRefreshEnabled === undefined &&
+    remoteRefreshEffective === undefined &&
+    !remoteRefreshForcedByCli
+  ) {
+    return undefined;
+  }
+
+  return {
+    remoteRefreshEnabled,
+    remoteRefreshEffective,
+    remoteRefreshForcedByCli,
+  };
+};
+
 const normalizeAmpcodeConfig = (payload: unknown): AmpcodeConfig | undefined => {
   const sourceRaw = isRecord(payload) ? (payload.ampcode ?? payload) : payload;
   if (!isRecord(sourceRaw)) return undefined;
@@ -459,6 +519,10 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
   }
   config.wsAuth = normalizeBoolean(raw['ws-auth'] ?? raw.wsAuth);
   config.forceModelPrefix = normalizeBoolean(raw['force-model-prefix'] ?? raw.forceModelPrefix);
+  const modelCatalog = normalizeModelCatalogConfig(raw['model-catalog'] ?? raw.modelCatalog);
+  if (modelCatalog) {
+    config.modelCatalog = modelCatalog;
+  }
   config.authPool = normalizeAuthPoolConfig(raw['auth-pool'] ?? raw.authPool);
   const routing = raw.routing;
   const strategyRaw = isRecord(routing)
@@ -466,6 +530,25 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
     : (raw['routing-strategy'] ?? raw.routingStrategy);
   if (strategyRaw !== undefined && strategyRaw !== null) {
     config.routingStrategy = String(strategyRaw);
+  }
+  const sessionAffinityRaw = isRecord(routing)
+    ? (routing['session-affinity'] ??
+      routing.sessionAffinity ??
+      routing['claude-code-session-affinity'] ??
+      routing.claudeCodeSessionAffinity)
+    : undefined;
+  const sessionAffinity = normalizeBoolean(sessionAffinityRaw);
+  if (sessionAffinity !== undefined) {
+    config.sessionAffinity = sessionAffinity;
+  }
+  const sessionAffinityTtlRaw = isRecord(routing)
+    ? (routing['session-affinity-ttl'] ?? routing.sessionAffinityTtl)
+    : undefined;
+  if (sessionAffinityTtlRaw !== undefined && sessionAffinityTtlRaw !== null) {
+    const ttl = String(sessionAffinityTtlRaw).trim();
+    if (ttl) {
+      config.sessionAffinityTtl = ttl;
+    }
   }
   const apiKeysRaw = raw['api-keys'] ?? raw.apiKeys;
   if (Array.isArray(apiKeysRaw)) {

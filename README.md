@@ -6,7 +6,7 @@ A single-file Web UI (React + TypeScript) for operating and troubleshooting the 
 
 **Main Project**: https://github.com/lauvww/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: ≥ 6.8.0 (recommended ≥ 6.8.15)
+**Minimum Required Version**: ≥ 2.0.0 (recommended: match the backend release exactly)
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the service is running.
 
@@ -16,6 +16,8 @@ Since version 6.0.19, the Web UI ships with the main program; access it via `/ma
 - The Auth Pool page focuses on the stable single-active-pool runtime model: you can manage multiple pool paths, switch the current pool, edit the current pool routing strategy, search accounts in the current pool, and quickly enable or disable auth files without reopening the full Auth Files page.
 - The Usage page now follows backend auth-pool metadata more closely. When auth-pool mode is enabled and no explicit pool filter is provided, the page defaults to the current auth pool and shows a scope hint from the server.
 - The Auth Files page keeps using the backend-reported `current_auth_pool` and shared path normalization helpers, so uploads, deletes, edits, and enable/disable actions stay scoped to the current pool.
+- The Config page now covers `routing.session-affinity`, `routing.session-affinity-ttl`, and `model-catalog.remote-refresh-enabled`, including runtime hints when the current process is force-overridden by `--remote-model` or `--local-model`.
+- The management UI now consumes runtime `auth-index` metadata from backend key endpoints, so config entries can be mapped back to live auth instances more reliably.
 - Local builds now stamp the generated `management.html` with a marker so packaged desktop deployments can prefer the locally published management panel instead of overwriting it with the background asset updater.
 
 ## What this is (and isn’t)
@@ -135,7 +137,7 @@ The UI language is automatically detected from browser settings and can be manua
 
 ## Versioning
 
-See [VERSIONING.md](VERSIONING.md). The UI version is managed through the repository `VERSION` file and should stay aligned with the backend fork version.
+See [VERSIONING.md](VERSIONING.md). The UI version is managed through the repository `VERSION` file, should stay aligned with `package.json`, and should move in lockstep with the backend fork major version.
 
 ## Security notes
 

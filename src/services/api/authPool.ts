@@ -1,5 +1,11 @@
 import { apiClient } from './client';
 import { normalizeAuthPoolState, type AuthPoolState, type RoutingStrategy } from '@/utils/authPool';
+import type { AuthFilesResponse } from '@/types/authFile';
+
+export interface AuthPoolFilesResponse extends AuthFilesResponse {
+  viewed_auth_pool?: string;
+  readonly?: boolean;
+}
 
 export const authPoolApi = {
   async getAuthPool(): Promise<AuthPoolState> {
@@ -33,5 +39,11 @@ export const authPoolApi = {
       path ? { path, strategy } : { strategy }
     );
     return normalizeAuthPoolState(data);
+  },
+
+  async listFiles(path?: string): Promise<AuthPoolFilesResponse> {
+    const query =
+      typeof path === 'string' && path.trim() ? `?path=${encodeURIComponent(path)}` : '';
+    return apiClient.get<AuthPoolFilesResponse>(`/auth-pool/files${query}`);
   },
 };

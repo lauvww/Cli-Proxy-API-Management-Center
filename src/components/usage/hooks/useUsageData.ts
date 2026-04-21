@@ -1,9 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   USAGE_STATS_STALE_TIME_MS,
   useNotificationStore,
-  useUsageStatsStore,
   type LoadUsageStatsOptions,
   type UsageStatsMeta,
 } from '@/stores';
@@ -37,29 +36,154 @@ export interface UseUsageDataReturn {
   importing: boolean;
 }
 
+const createEmptyMeta = (): UsageStatsMeta => ({
+  pool_filter: 'all',
+  pool_filter_applied: false,
+  auth_pool_filter: '',
+  auth_pool_filter_applied: false,
+  auth_pool_filter_defaulted: false,
+  current_auth_pool: '',
+  auth_pool_enabled: false,
+  usage_scope_hint: '',
+});
+
+type UsageHookState = {
+  usage: UsagePayload | null;
+  meta: UsageStatsMeta;
+  loading: boolean;
+  error: string;
+  lastRefreshedAt: number | null;
+};
+
+type CachedUsageScope = Omit<UsageHookState, 'loading' | 'error'>;
+
+const createEmptyState = (): UsageHookState => ({
+  usage: null,
+  meta: createEmptyMeta(),
+  loading: false,
+  error: '',
+  lastRefreshedAt: null,
+});
+
+const buildUsageScopeKey = (options: LoadUsageStatsOptions): string => {
+  const pool = options.pool ?? 'all';
+  const authPool = options.authPool?.trim() ?? '';
+  return `${pool}::${authPool}`;
+};
+
 export function useUsageData(options: LoadUsageStatsOptions = {}): UseUsageDataReturn {
   const { t } = useTranslation();
   const { showNotification } = useNotificationStore();
-  const usageSnapshot = useUsageStatsStore((state) => state.usage);
-  const usageMeta = useUsageStatsStore((state) => state.meta);
-  const loading = useUsageStatsStore((state) => state.loading);
-  const storeError = useUsageStatsStore((state) => state.error);
-  const lastRefreshedAtTs = useUsageStatsStore((state) => state.lastRefreshedAt);
-  const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats);
-
+  const [state, setState] = useState<UsageHookState>(() => createEmptyState());
   const [modelPrices, setModelPrices] = useState<Record<string, ModelPrice>>({});
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const cacheRef = useRef<Map<string, CachedUsageScope>>(new Map());
+  const requestTokenRef = useRef(0);
+  const scopeKey = useMemo(() => buildUsageScopeKey(options), [options.authPool, options.pool]);
+
+  const loadUsageInternal = useCallback(
+    async ({
+      force = false,
+      staleTimeMs = USAGE_STATS_STALE_TIME_MS,
+    }: {
+      force?: boolean;
+      staleTimeMs?: number;
+    } = {}) => {
+      const cached = cacheRef.current.get(scopeKey);
+      if (!force && cached?.lastRefreshedAt && Date.now() - cached.lastRefreshedAt < staleTimeMs) {
+        setState({
+          usage: cached.usage,
+          meta: cached.meta,
+          loading: false,
+          error: '',
+          lastRefreshedAt: cached.lastRefreshedAt,
+        });
+        return;
+      }
+
+      const requestId = (requestTokenRef.current += 1);
+      setState((prev) => ({
+        usage: cached?.usage ?? prev.usage,
+        meta: cached?.meta ?? prev.meta,
+        loading: true,
+        error: '',
+        lastRefreshedAt: cached?.lastRefreshedAt ?? prev.lastRefreshedAt,
+      }));
+
+      try {
+        const usageResponse = await usageApi.getUsage({
+          pool: options.pool,
+          authPool: options.authPool,
+        });
+        if (requestId !== requestTokenRef.current) {
+          return;
+        }
+
+        const rawUsage = usageResponse?.usage ?? usageResponse;
+        const usage = rawUsage && typeof rawUsage === 'object' ? (rawUsage as UsagePayload) : null;
+        const meta: UsageStatsMeta = {
+          pool_filter: usageResponse?.pool_filter,
+          pool_filter_applied: usageResponse?.pool_filter_applied,
+          auth_pool_filter: usageResponse?.auth_pool_filter,
+          auth_pool_filter_applied: usageResponse?.auth_pool_filter_applied,
+          auth_pool_filter_defaulted: usageResponse?.auth_pool_filter_defaulted,
+          current_auth_pool: usageResponse?.current_auth_pool,
+          auth_pool_enabled: usageResponse?.auth_pool_enabled,
+          usage_scope_hint: usageResponse?.usage_scope_hint,
+          by_pool: usageResponse?.by_pool,
+        };
+        const lastRefreshedAt = Date.now();
+
+        cacheRef.current.set(scopeKey, { usage, meta, lastRefreshedAt });
+        setState({
+          usage,
+          meta,
+          loading: false,
+          error: '',
+          lastRefreshedAt,
+        });
+      } catch (err: unknown) {
+        if (requestId !== requestTokenRef.current) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : '';
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error: message || t('usage_stats.loading_error'),
+        }));
+        throw err;
+      }
+    },
+    [options.authPool, options.pool, scopeKey, t]
+  );
 
   const loadUsage = useCallback(async () => {
-    await loadUsageStats({ ...options, force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
-  }, [loadUsageStats, options]);
+    await loadUsageInternal({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
+  }, [loadUsageInternal]);
 
   useEffect(() => {
-    void loadUsageStats({ ...options, staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {});
+    const cached = cacheRef.current.get(scopeKey);
+    if (cached) {
+      setState({
+        usage: cached.usage,
+        meta: cached.meta,
+        loading: false,
+        error: '',
+        lastRefreshedAt: cached.lastRefreshedAt,
+      });
+    } else {
+      setState(createEmptyState());
+    }
+
+    void loadUsageInternal({ staleTimeMs: USAGE_STATS_STALE_TIME_MS }).catch(() => {});
+  }, [loadUsageInternal, scopeKey]);
+
+  useEffect(() => {
     setModelPrices(loadModelPrices());
-  }, [loadUsageStats, options]);
+  }, []);
 
   const handleExport = async () => {
     setExporting(true);
@@ -118,7 +242,7 @@ export function useUsageData(options: LoadUsageStatsOptions = {}): UseUsageDataR
         'success'
       );
       try {
-        await loadUsageStats({ ...options, force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
+        await loadUsageInternal({ force: true, staleTimeMs: USAGE_STATS_STALE_TIME_MS });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : '';
         showNotification(
@@ -142,16 +266,12 @@ export function useUsageData(options: LoadUsageStatsOptions = {}): UseUsageDataR
     saveModelPrices(prices);
   }, []);
 
-  const usage = usageSnapshot as UsagePayload | null;
-  const error = storeError || '';
-  const lastRefreshedAt = lastRefreshedAtTs ? new Date(lastRefreshedAtTs) : null;
-
   return {
-    usage,
-    meta: usageMeta,
-    loading,
-    error,
-    lastRefreshedAt,
+    usage: state.usage,
+    meta: state.meta,
+    loading: state.loading,
+    error: state.error,
+    lastRefreshedAt: state.lastRefreshedAt ? new Date(state.lastRefreshedAt) : null,
     modelPrices,
     setModelPrices: handleSetModelPrices,
     loadUsage,

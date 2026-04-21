@@ -6,7 +6,7 @@
 
 **主项目**: https://github.com/lauvww/CLIProxyAPI  
 **示例地址**: https://remote.router-for.me/  
-**最低版本要求**: ≥ 6.8.0（推荐 ≥ 6.8.15）
+**最低版本要求**: ≥ 2.0.0（推荐与后端版本完全一致）
 
 从6.0.19版本开始，Web UI 随主程序一起提供；服务运行后，通过 API 端口上的"/management.html"访问它。
 
@@ -16,6 +16,8 @@
 - 号池管理页围绕稳定的“单当前号池”运行语义展开：可以维护多个号池路径、切换当前号池、修改当前号池轮询策略，并在页面内直接搜索当前号池账号以及快速启用/停用认证文件。
 - 使用统计页现在更严格地跟随后端返回的 auth-pool 元数据：当号池模式开启且前端没有显式指定筛选条件时，会默认展示当前号池，并直接展示后端返回的范围提示。
 - 认证文件页继续优先使用后端返回的 `current_auth_pool`，并统一使用共享的路径标准化逻辑，确保上传、删除、编辑和启停操作都限定在当前号池内。
+- 配置页现在已经正式接入 `routing.session-affinity`、`routing.session-affinity-ttl` 和 `model-catalog.remote-refresh-enabled`，并能在当前进程被 `--remote-model` / `--local-model` 强制覆盖时显示运行态提示。
+- 管理面板现在会消费后端返回的 `auth-index` 运行态元数据，便于把界面中的配置项与运行中的认证实例稳定对应起来。
 - 本地构建产物会给 `management.html` 打上本地标记，桌面打包时可以优先使用本地发布的管理页，避免被后台面板资源更新逻辑覆盖。
 
 ## 这是什么（以及不是什么）
@@ -142,7 +144,7 @@ npm run build
 
 ## 版本管理
 
-版本规则见 [VERSIONING.md](VERSIONING.md)。管理中心版本以仓库中的 `VERSION` 文件为准，并应与后端版本保持一致。
+版本规则见 [VERSIONING.md](VERSIONING.md)。管理中心版本以仓库中的 `VERSION` 文件为准，应与 `package.json` 保持一致，并与后端主版本同步演进。
 
 ## 安全提示
 

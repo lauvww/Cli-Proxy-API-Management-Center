@@ -651,19 +651,10 @@ export function formatUsd(value: number): string {
   return `$${parts}`;
 }
 
-const usageDetailsCache = new WeakMap<object, UsageDetail[]>();
-const usageDetailsWithEndpointCache = new WeakMap<object, UsageDetailWithEndpoint[]>();
-
 /**
  * 从使用数据中收集所有请求明细
  */
 export function collectUsageDetails(usageData: unknown): UsageDetail[] {
-  const cacheKey = isRecord(usageData) ? (usageData as object) : null;
-  if (cacheKey) {
-    const cached = usageDetailsCache.get(cacheKey);
-    if (cached) return cached;
-  }
-
   const apis = getApisRecord(usageData);
   if (!apis) return [];
   const details: UsageDetail[] = [];
@@ -719,9 +710,6 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
     });
   });
 
-  if (cacheKey) {
-    usageDetailsCache.set(cacheKey, details);
-  }
   return details;
 }
 
@@ -729,12 +717,6 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
  * 从使用数据中收集包含 endpoint/method/path 的请求明细
  */
 export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetailWithEndpoint[] {
-  const cacheKey = isRecord(usageData) ? (usageData as object) : null;
-  if (cacheKey) {
-    const cached = usageDetailsWithEndpointCache.get(cacheKey);
-    if (cached) return cached;
-  }
-
   const apis = getApisRecord(usageData);
   if (!apis) return [];
 
@@ -798,9 +780,6 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
     });
   });
 
-  if (cacheKey) {
-    usageDetailsWithEndpointCache.set(cacheKey, details);
-  }
   return details;
 }
 
@@ -1052,13 +1031,43 @@ export function getApiStats(
 ): ApiStats[] {
   const apis = getApisRecord(usageData);
   if (!apis) return [];
-  const result: ApiStats[] = [];
+  const merged = new Map<string, ApiStats>();
 
   const resolveAPIBucketLabel = (endpoint: string): string => {
     const alias = typeof apiKeyAliases[endpoint] === 'string' ? apiKeyAliases[endpoint].trim() : '';
     if (alias) {
       return alias;
     }
+
+    const trimmedEndpoint = endpoint.trim();
+    const localAlias =
+      typeof apiKeyAliases['sk-UJ3VkVkY5VEFinWkR'] === 'string'
+        ? apiKeyAliases['sk-UJ3VkVkY5VEFinWkR'].trim()
+        : 'Local';
+    const remoteAlias =
+      typeof apiKeyAliases['sk-H3vtFmzXhwO7D8eGP'] === 'string'
+        ? apiKeyAliases['sk-H3vtFmzXhwO7D8eGP'].trim()
+        : 'Remote';
+
+    if (
+      trimmedEndpoint === 'Codex' ||
+      trimmedEndpoint === 'sk-REPLACE-WITH-YOUR-UPSTREAM-OPENAI-KEY' ||
+      trimmedEndpoint === 'sk-UJ3VkVkY5VEFinWkR' ||
+      trimmedEndpoint === 'Local' ||
+      trimmedEndpoint === '本地'
+    ) {
+      return localAlias || 'Local';
+    }
+
+    if (
+      trimmedEndpoint === 'sk-H3vtFmzXhwO7D8eGP' ||
+      trimmedEndpoint === 'Remote' ||
+      trimmedEndpoint === '远程' ||
+      trimmedEndpoint === '杩滅▼'
+    ) {
+      return remoteAlias || 'Remote';
+    }
+
     return maskUsageSensitiveValue(endpoint) || endpoint;
   };
 
@@ -1126,18 +1135,41 @@ export function getApiStats(
       ? Number(apiData.failure_count) || 0
       : derivedFailureCount;
 
-    result.push({
-      endpoint: resolveAPIBucketLabel(endpoint),
-      totalRequests: Number(apiData.total_requests) || 0,
-      successCount,
-      failureCount,
-      totalTokens: Number(apiData.total_tokens) || 0,
-      totalCost,
-      models,
+    const displayEndpoint = resolveAPIBucketLabel(endpoint);
+    const existing = merged.get(displayEndpoint) ?? {
+      endpoint: displayEndpoint,
+      totalRequests: 0,
+      successCount: 0,
+      failureCount: 0,
+      totalTokens: 0,
+      totalCost: 0,
+      models: {},
+    };
+
+    existing.totalRequests += Number(apiData.total_requests) || 0;
+    existing.successCount += successCount;
+    existing.failureCount += failureCount;
+    existing.totalTokens += Number(apiData.total_tokens) || 0;
+    existing.totalCost += totalCost;
+
+    Object.entries(models).forEach(([modelName, stats]) => {
+      const current = existing.models[modelName] ?? {
+        requests: 0,
+        successCount: 0,
+        failureCount: 0,
+        tokens: 0,
+      };
+      current.requests += stats.requests;
+      current.successCount += stats.successCount;
+      current.failureCount += stats.failureCount;
+      current.tokens += stats.tokens;
+      existing.models[modelName] = current;
     });
+
+    merged.set(displayEndpoint, existing);
   });
 
-  return result;
+  return Array.from(merged.values());
 }
 
 /**
@@ -1581,22 +1613,29 @@ export function calculateStatusBarData(
     { length: BLOCK_COUNT },
     () => ({ success: 0, failure: 0 })
   );
+  const blockTimeRanges: Array<{ startTime: number; endTime: number }> = Array.from(
+    { length: BLOCK_COUNT },
+    (_, idx) => {
+      const startTime = windowStart + idx * BLOCK_DURATION_MS;
+      return {
+        startTime,
+        endTime: startTime + BLOCK_DURATION_MS,
+      };
+    }
+  );
 
   let totalSuccess = 0;
   let totalFailure = 0;
+  const filteredDetails: Array<UsageDetail & { __resolvedTimestampMs: number }> = [];
 
-  // Filter and bucket the usage details
+  // Filter details first so we can fall back to historical samples when the
+  // recent fixed window has no activity.
   usageDetails.forEach((detail) => {
     const timestamp =
       typeof detail.__timestampMs === 'number'
         ? detail.__timestampMs
         : Date.parse(detail.timestamp);
-    if (
-      !Number.isFinite(timestamp) ||
-      timestamp <= 0 ||
-      timestamp < windowStart ||
-      timestamp > now
-    ) {
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > now) {
       return;
     }
 
@@ -1608,11 +1647,51 @@ export function calculateStatusBarData(
       return;
     }
 
-    // Calculate which block this falls into (0 = oldest, 19 = newest)
-    const ageMs = now - timestamp;
-    const blockIndex = BLOCK_COUNT - 1 - Math.floor(ageMs / BLOCK_DURATION_MS);
+    filteredDetails.push({
+      ...detail,
+      __resolvedTimestampMs: timestamp,
+    });
+  });
 
-    if (blockIndex >= 0 && blockIndex < BLOCK_COUNT) {
+  const recentDetails = filteredDetails.filter(
+    (detail) => detail.__resolvedTimestampMs >= windowStart && detail.__resolvedTimestampMs <= now
+  );
+
+  if (recentDetails.length > 0) {
+    recentDetails.forEach((detail) => {
+      const timestamp = detail.__resolvedTimestampMs;
+
+      // Calculate which block this falls into (0 = oldest, 19 = newest)
+      const ageMs = now - timestamp;
+      const blockIndex = BLOCK_COUNT - 1 - Math.floor(ageMs / BLOCK_DURATION_MS);
+
+      if (blockIndex >= 0 && blockIndex < BLOCK_COUNT) {
+        if (detail.failed) {
+          blockStats[blockIndex].failure += 1;
+          totalFailure += 1;
+        } else {
+          blockStats[blockIndex].success += 1;
+          totalSuccess += 1;
+        }
+      }
+    });
+  } else if (filteredDetails.length > 0) {
+    const historicalSample = [...filteredDetails]
+      .sort((left, right) => left.__resolvedTimestampMs - right.__resolvedTimestampMs)
+      .slice(-BLOCK_COUNT);
+    const startIndex = BLOCK_COUNT - historicalSample.length;
+
+    historicalSample.forEach((detail, sampleIndex) => {
+      const blockIndex = startIndex + sampleIndex;
+      if (blockIndex < 0 || blockIndex >= BLOCK_COUNT) {
+        return;
+      }
+
+      blockTimeRanges[blockIndex] = {
+        startTime: detail.__resolvedTimestampMs,
+        endTime: detail.__resolvedTimestampMs,
+      };
+
       if (detail.failed) {
         blockStats[blockIndex].failure += 1;
         totalFailure += 1;
@@ -1620,8 +1699,8 @@ export function calculateStatusBarData(
         blockStats[blockIndex].success += 1;
         totalSuccess += 1;
       }
-    }
-  });
+    });
+  }
 
   // Convert stats to block states and build details
   const blocks: StatusBlockState[] = [];
@@ -1639,13 +1718,13 @@ export function calculateStatusBarData(
       blocks.push('mixed');
     }
 
-    const blockStartTime = windowStart + idx * BLOCK_DURATION_MS;
+    const timeRange = blockTimeRanges[idx];
     blockDetails.push({
       success: stat.success,
       failure: stat.failure,
       rate: total > 0 ? stat.success / total : -1,
-      startTime: blockStartTime,
-      endTime: blockStartTime + BLOCK_DURATION_MS,
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
     });
   });
 

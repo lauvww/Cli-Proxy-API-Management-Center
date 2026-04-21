@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { TFunction } from 'i18next';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -84,64 +83,241 @@ type QuotaStateLike =
       planType?: string | null;
       tierLabel?: string | null;
       creditBalance?: number | null;
-      windows?: Array<{ usedPercent?: number | null }>;
+      windows?: Array<{ id?: string; label?: string; usedPercent?: number | null }>;
       groups?: Array<{ remainingFraction?: number }>;
       rows?: Array<{ used?: number; limit?: number }>;
     }
   | undefined;
 
-const formatQuotaSummary = (quotaType: QuotaProviderType | null, quota: QuotaStateLike): string => {
-  if (!quotaType || !quota || quota.status !== 'success') {
+type AuthPoolMetricTone = 'neutral' | 'provider' | 'success' | 'warning' | 'danger' | 'premium';
+type AuthPoolMetricSlot =
+  | 'provider'
+  | 'premium'
+  | 'priority'
+  | 'five-hour'
+  | 'seven-day'
+  | 'secondary';
+
+type QuotaMetricBadge = {
+  key: string;
+  label: string;
+  value: string;
+  tone: AuthPoolMetricTone;
+  slot: AuthPoolMetricSlot;
+  large?: boolean;
+};
+
+const getRemainingPercentLabel = (usedPercent?: number | null): string => {
+  if (typeof usedPercent !== 'number') {
+    return '--';
+  }
+  return `${Math.max(0, Math.round(100 - usedPercent))}%`;
+};
+
+const getRemainingPercent = (usedPercent?: number | null): number | null => {
+  if (typeof usedPercent !== 'number') {
+    return null;
+  }
+  return Math.max(0, Math.round(100 - usedPercent));
+};
+
+const getMetricToneByPercent = (remainingPercent: number | null): AuthPoolMetricTone => {
+  if (remainingPercent === null) {
+    return 'neutral';
+  }
+  if (remainingPercent <= 20) {
+    return 'danger';
+  }
+  if (remainingPercent <= 50) {
+    return 'warning';
+  }
+  return 'success';
+};
+
+const isPremiumPlan = (value: string): boolean => /pro|max|ultra|premium/i.test(value);
+
+const toTitleWords = (value: string): string =>
+  value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase())
+    .join(' ');
+
+const getPlanBadgeText = (
+  file: AuthFileItem,
+  quotaType: QuotaProviderType | null,
+  quota: QuotaStateLike
+): string => {
+  const planType = readText(quota?.planType) || resolvePlanType(file);
+  const tierLabel = readText(quota?.tierLabel);
+  const source = tierLabel || planType;
+  if (!source) {
     return '';
   }
 
-  if (quotaType === 'codex') {
-    const planType = readText(quota.planType);
-    const usedPercent = quota.windows?.[0]?.usedPercent;
-    if (planType && typeof usedPercent === 'number') {
-      return `${planType} · ${Math.max(0, Math.round(100 - usedPercent))}%`;
+  const normalized = source.toLowerCase().replace(/\s+/g, '');
+  if (quotaType === 'codex' && normalized === 'pro') {
+    return 'Pro 20x';
+  }
+  if (normalized.includes('prolite') || normalized.includes('pro-lite')) {
+    return 'Pro Lite';
+  }
+  if (normalized.includes('max')) {
+    return 'Max';
+  }
+  if (normalized.includes('ultra')) {
+    return 'Ultra';
+  }
+  if (normalized.includes('pro')) {
+    return tierLabel || 'Pro';
+  }
+
+  return toTitleWords(source);
+};
+
+const findQuotaWindow = (
+  windows: Array<{ id?: string; label?: string; usedPercent?: number | null }> | undefined,
+  matcher: (id: string) => boolean
+) => {
+  if (!Array.isArray(windows)) return undefined;
+  return windows.find((window) => matcher(readText(window.id)));
+};
+
+const buildQuotaMetricBadges = (
+  file: AuthFileItem,
+  quotaType: QuotaProviderType | null,
+  quota: QuotaStateLike,
+  t: ReturnType<typeof useTranslation>['t']
+): QuotaMetricBadge[] => {
+  const badges: QuotaMetricBadge[] = [];
+  const planText = getPlanBadgeText(file, quotaType, quota);
+  const hasPremiumPlan = isPremiumPlan(planText);
+  const priorityValue = parsePriorityValue(file.priority ?? file['priority']);
+
+  badges.push({
+    key: 'provider',
+    label: getTypeLabel(t, file.type || 'unknown'),
+    value: '',
+    tone: 'provider',
+    slot: 'provider',
+  });
+
+  if (planText) {
+    badges.push({
+      key: `plan-${planText}`,
+      label: planText,
+      value: '',
+      tone: hasPremiumPlan ? 'premium' : 'neutral',
+      slot: 'premium',
+      large: hasPremiumPlan,
+    });
+  }
+
+  if (priorityValue !== undefined) {
+    badges.push({
+      key: `priority-${priorityValue}`,
+      label: `P${priorityValue}`,
+      value: '',
+      tone: hasPremiumPlan ? 'premium' : 'neutral',
+      slot: 'priority',
+    });
+  }
+
+  if (!quota) {
+    return badges;
+  }
+
+  if (quota.status === 'loading') {
+    badges.push({
+      key: 'quota-loading',
+      label: 'Quota',
+      value: '...',
+      tone: 'neutral',
+      slot: 'secondary',
+    });
+    return badges;
+  }
+
+  if (quota.status !== 'success') {
+    return badges;
+  }
+
+  if (quotaType === 'codex' || quotaType === 'claude') {
+    const fiveHourWindow = findQuotaWindow(quota.windows, (id) => id === 'five-hour');
+    const weeklyWindow = findQuotaWindow(
+      quota.windows,
+      (id) => id === 'weekly' || id.startsWith('seven-day')
+    );
+
+    if (fiveHourWindow) {
+      const remainingPercent = getRemainingPercent(fiveHourWindow.usedPercent);
+      badges.push({
+        key: '5h',
+        label: '5H',
+        value: getRemainingPercentLabel(fiveHourWindow.usedPercent),
+        tone: getMetricToneByPercent(remainingPercent),
+        slot: 'five-hour',
+      });
     }
-    if (planType) return planType;
-    if (typeof usedPercent === 'number') {
-      return `${Math.max(0, Math.round(100 - usedPercent))}%`;
+    if (weeklyWindow) {
+      const remainingPercent = getRemainingPercent(weeklyWindow.usedPercent);
+      badges.push({
+        key: '7d',
+        label: '7D',
+        value: getRemainingPercentLabel(weeklyWindow.usedPercent),
+        tone: getMetricToneByPercent(remainingPercent),
+        slot: 'seven-day',
+      });
     }
   }
 
-  if (quotaType === 'claude') {
-    const planType = readText(quota.planType);
-    const usedPercent = quota.windows?.[0]?.usedPercent;
-    if (planType && typeof usedPercent === 'number') {
-      return `${planType} · ${Math.max(0, Math.round(100 - usedPercent))}%`;
-    }
-    if (planType) return planType;
-    if (typeof usedPercent === 'number') {
-      return `${Math.max(0, Math.round(100 - usedPercent))}%`;
-    }
-  }
-
-  if (quotaType === 'gemini-cli') {
-    if (quota.tierLabel && typeof quota.creditBalance === 'number') {
-      return `${quota.tierLabel} · ${quota.creditBalance}`;
-    }
-    if (quota.tierLabel) return quota.tierLabel;
-    if (typeof quota.creditBalance === 'number') return String(quota.creditBalance);
-  }
-
-  if (quotaType === 'antigravity') {
-    const remainingFraction = quota.groups?.[0]?.remainingFraction;
-    if (typeof remainingFraction === 'number') {
-      return `${Math.round(Math.max(0, Math.min(1, remainingFraction)) * 100)}%`;
-    }
+  if (quotaType === 'gemini-cli' && typeof quota.creditBalance === 'number') {
+    badges.push({
+      key: 'credits',
+      label: 'Credits',
+      value: String(quota.creditBalance),
+      tone: hasPremiumPlan ? 'premium' : 'neutral',
+      slot: 'secondary',
+    });
   }
 
   if (quotaType === 'kimi') {
-    const row = quota.rows?.[0];
-    if (row && typeof row.used === 'number' && typeof row.limit === 'number' && row.limit > 0) {
-      return `${row.used}/${row.limit}`;
+    const firstRow = quota.rows?.[0];
+    if (firstRow && typeof firstRow.used === 'number' && typeof firstRow.limit === 'number') {
+      badges.push({
+        key: 'quota',
+        label: 'Quota',
+        value: `${firstRow.used}/${firstRow.limit}`,
+        tone:
+          firstRow.limit - firstRow.used <= 0
+            ? 'danger'
+            : firstRow.limit - firstRow.used >= firstRow.limit * 0.8
+              ? 'success'
+              : 'warning',
+        slot: 'secondary',
+      });
     }
   }
 
-  return '';
+  if (quotaType === 'antigravity') {
+    const firstGroup = quota.groups?.[0];
+    if (firstGroup && typeof firstGroup.remainingFraction === 'number') {
+      badges.push({
+        key: 'quota',
+        label: 'Quota',
+        value: `${Math.round(Math.max(0, Math.min(1, firstGroup.remainingFraction)) * 100)}%`,
+        tone:
+          firstGroup.remainingFraction <= 0
+            ? 'danger'
+            : firstGroup.remainingFraction >= 0.8
+              ? 'success'
+              : 'warning',
+        slot: 'secondary',
+      });
+    }
+  }
+
+  return badges;
 };
 
 const buildSearchText = (file: AuthFileItem): string =>
@@ -187,39 +363,48 @@ export function AuthPoolPage() {
   );
   const [draftPath, setDraftPath] = useState('');
   const [search, setSearch] = useState('');
-  const [currentPoolFiles, setCurrentPoolFiles] = useState<AuthFileItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [viewPath, setViewPath] = useState('');
+  const [viewedPoolFiles, setViewedPoolFiles] = useState<AuthFileItem[]>([]);
+  const [poolLoading, setPoolLoading] = useState(true);
+  const [filesLoading, setFilesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const quotaQueueRunIdRef = useRef(0);
+  const filesRequestIdRef = useRef(0);
+  const quotaStateRef = useRef({
+    antigravityQuota,
+    claudeQuota,
+    codexQuota,
+    geminiCliQuota,
+    kimiQuota,
+  });
 
+  const loading = poolLoading || filesLoading;
   const disableControls = connectionStatus !== 'connected' || saving;
 
   const refreshAuthPool = useCallback(async () => {
     if (connectionStatus !== 'connected') {
       setAuthPool(getAuthPoolStateFromConfig(useConfigStore.getState().config));
-      setCurrentPoolFiles([]);
-      setLoading(false);
+      setViewedPoolFiles([]);
+      setPoolLoading(false);
+      setFilesLoading(false);
       return;
     }
 
-    setLoading(true);
+    setPoolLoading(true);
     setError('');
     try {
-      const [poolState, authFilesResponse] = await Promise.all([
-        authPoolApi.getAuthPool(),
-        authFilesApi.list(),
-      ]);
+      const poolState = await authPoolApi.getAuthPool();
       setAuthPool(poolState);
-      setCurrentPoolFiles(authFilesResponse?.files ?? []);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('notification.refresh_failed');
       setError(message);
       setAuthPool(getAuthPoolStateFromConfig(config));
-      setCurrentPoolFiles([]);
+      setViewedPoolFiles([]);
     } finally {
-      setLoading(false);
+      setPoolLoading(false);
     }
-  }, [connectionStatus, t]);
+  }, [config, connectionStatus, t]);
 
   useHeaderRefresh(refreshAuthPool);
 
@@ -242,93 +427,215 @@ export function AuthPoolPage() {
   }, [connectionStatus, loadUsageStats]);
 
   useEffect(() => {
-    if (connectionStatus !== 'connected' || currentPoolFiles.length === 0) {
+    quotaStateRef.current = {
+      antigravityQuota,
+      claudeQuota,
+      codexQuota,
+      geminiCliQuota,
+      kimiQuota,
+    };
+  }, [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota]);
+
+  useEffect(() => {
+    const currentRunId = quotaQueueRunIdRef.current + 1;
+    quotaQueueRunIdRef.current = currentRunId;
+
+    const normalizedViewedPath = normalizePathForCompare(
+      viewPath || authPool.activePath || authPool.authDir
+    );
+    const normalizedCurrentPath = normalizePathForCompare(authPool.activePath || authPool.authDir);
+
+    if (
+      connectionStatus !== 'connected' ||
+      (normalizedViewedPath !== '' &&
+        normalizedCurrentPath !== '' &&
+        normalizedViewedPath !== normalizedCurrentPath) ||
+      viewedPoolFiles.length === 0
+    ) {
       return;
     }
 
-    let cancelled = false;
-    const scheduleFetch = <TState, TData>(
-      currentState: TState | undefined,
-      setter: (updater: (prev: Record<string, TState>) => Record<string, TState>) => void,
-      configEntry: {
-        buildLoadingState: () => TState;
-        buildSuccessState: (data: TData) => TState;
-        buildErrorState: (message: string, status?: number) => TState;
-        fetchQuota: (file: AuthFileItem, translate: TFunction) => Promise<TData>;
-      },
-      file: AuthFileItem
-    ) => {
-      const stateLike = currentState as QuotaStateLike;
-      if (stateLike?.status === 'loading' || stateLike?.status === 'success') {
-        return;
-      }
+    const isCancelled = () => quotaQueueRunIdRef.current !== currentRunId;
 
-      setter((prev: Record<string, TState>) => ({
-        ...prev,
-        [file.name]: configEntry.buildLoadingState(),
-      }));
-
-      void configEntry
-        .fetchQuota(file, t)
-        .then((data) => {
-          if (cancelled) return;
-          setter((prev: Record<string, TState>) => ({
-            ...prev,
-            [file.name]: configEntry.buildSuccessState(data),
-          }));
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          const message = err instanceof Error ? err.message : t('common.unknown_error');
-          const status =
-            err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
-              ? err.status
-              : undefined;
-          setter((prev: Record<string, TState>) => ({
-            ...prev,
-            [file.name]: configEntry.buildErrorState(message, status),
-          }));
-        });
-    };
-
-    currentPoolFiles.forEach((file) => {
-      const quotaType = resolveQuotaType(file);
-      if (!quotaType || file.disabled === true) {
-        return;
-      }
-
+    const getQuotaState = (quotaType: QuotaProviderType, fileName: string): QuotaStateLike => {
+      const quotaState = quotaStateRef.current;
       switch (quotaType) {
         case 'antigravity':
-          scheduleFetch(antigravityQuota[file.name], setAntigravityQuota, ANTIGRAVITY_CONFIG, file);
-          break;
+          return quotaState.antigravityQuota[fileName] as QuotaStateLike;
         case 'claude':
-          scheduleFetch(claudeQuota[file.name], setClaudeQuota, CLAUDE_CONFIG, file);
-          break;
+          return quotaState.claudeQuota[fileName] as QuotaStateLike;
         case 'codex':
-          scheduleFetch(codexQuota[file.name], setCodexQuota, CODEX_CONFIG, file);
-          break;
+          return quotaState.codexQuota[fileName] as QuotaStateLike;
         case 'gemini-cli':
-          scheduleFetch(geminiCliQuota[file.name], setGeminiCliQuota, GEMINI_CLI_CONFIG, file);
-          break;
+          return quotaState.geminiCliQuota[fileName] as QuotaStateLike;
         case 'kimi':
-          scheduleFetch(kimiQuota[file.name], setKimiQuota, KIMI_CONFIG, file);
-          break;
+          return quotaState.kimiQuota[fileName] as QuotaStateLike;
         default:
-          break;
+          return undefined;
       }
-    });
+    };
+
+    const runSequentialQuotaFetch = async () => {
+      for (const file of viewedPoolFiles) {
+        if (isCancelled()) {
+          return;
+        }
+
+        const quotaType = resolveQuotaType(file);
+        if (!quotaType || file.disabled === true) {
+          continue;
+        }
+
+        const currentState = getQuotaState(quotaType, file.name);
+        if (currentState?.status === 'loading' || currentState?.status === 'success') {
+          continue;
+        }
+
+        switch (quotaType) {
+          case 'antigravity':
+            setAntigravityQuota((prev) => ({
+              ...prev,
+              [file.name]: ANTIGRAVITY_CONFIG.buildLoadingState(),
+            }));
+            try {
+              const data = await ANTIGRAVITY_CONFIG.fetchQuota(file, t);
+              if (isCancelled()) return;
+              setAntigravityQuota((prev) => ({
+                ...prev,
+                [file.name]: ANTIGRAVITY_CONFIG.buildSuccessState(data),
+              }));
+            } catch (err: unknown) {
+              if (isCancelled()) return;
+              const message = err instanceof Error ? err.message : t('common.unknown_error');
+              const status =
+                err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+                  ? err.status
+                  : undefined;
+              setAntigravityQuota((prev) => ({
+                ...prev,
+                [file.name]: ANTIGRAVITY_CONFIG.buildErrorState(message, status),
+              }));
+            }
+            break;
+          case 'claude':
+            setClaudeQuota((prev) => ({
+              ...prev,
+              [file.name]: CLAUDE_CONFIG.buildLoadingState(),
+            }));
+            try {
+              const data = await CLAUDE_CONFIG.fetchQuota(file, t);
+              if (isCancelled()) return;
+              setClaudeQuota((prev) => ({
+                ...prev,
+                [file.name]: CLAUDE_CONFIG.buildSuccessState(data),
+              }));
+            } catch (err: unknown) {
+              if (isCancelled()) return;
+              const message = err instanceof Error ? err.message : t('common.unknown_error');
+              const status =
+                err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+                  ? err.status
+                  : undefined;
+              setClaudeQuota((prev) => ({
+                ...prev,
+                [file.name]: CLAUDE_CONFIG.buildErrorState(message, status),
+              }));
+            }
+            break;
+          case 'codex':
+            setCodexQuota((prev) => ({
+              ...prev,
+              [file.name]: CODEX_CONFIG.buildLoadingState(),
+            }));
+            try {
+              const data = await CODEX_CONFIG.fetchQuota(file, t);
+              if (isCancelled()) return;
+              setCodexQuota((prev) => ({
+                ...prev,
+                [file.name]: CODEX_CONFIG.buildSuccessState(data),
+              }));
+            } catch (err: unknown) {
+              if (isCancelled()) return;
+              const message = err instanceof Error ? err.message : t('common.unknown_error');
+              const status =
+                err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+                  ? err.status
+                  : undefined;
+              setCodexQuota((prev) => ({
+                ...prev,
+                [file.name]: CODEX_CONFIG.buildErrorState(message, status),
+              }));
+            }
+            break;
+          case 'gemini-cli':
+            setGeminiCliQuota((prev) => ({
+              ...prev,
+              [file.name]: GEMINI_CLI_CONFIG.buildLoadingState(),
+            }));
+            try {
+              const data = await GEMINI_CLI_CONFIG.fetchQuota(file, t);
+              if (isCancelled()) return;
+              setGeminiCliQuota((prev) => ({
+                ...prev,
+                [file.name]: GEMINI_CLI_CONFIG.buildSuccessState(data),
+              }));
+            } catch (err: unknown) {
+              if (isCancelled()) return;
+              const message = err instanceof Error ? err.message : t('common.unknown_error');
+              const status =
+                err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+                  ? err.status
+                  : undefined;
+              setGeminiCliQuota((prev) => ({
+                ...prev,
+                [file.name]: GEMINI_CLI_CONFIG.buildErrorState(message, status),
+              }));
+            }
+            break;
+          case 'kimi':
+            setKimiQuota((prev) => ({
+              ...prev,
+              [file.name]: KIMI_CONFIG.buildLoadingState(),
+            }));
+            try {
+              const data = await KIMI_CONFIG.fetchQuota(file, t);
+              if (isCancelled()) return;
+              setKimiQuota((prev) => ({
+                ...prev,
+                [file.name]: KIMI_CONFIG.buildSuccessState(data),
+              }));
+            } catch (err: unknown) {
+              if (isCancelled()) return;
+              const message = err instanceof Error ? err.message : t('common.unknown_error');
+              const status =
+                err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+                  ? err.status
+                  : undefined;
+              setKimiQuota((prev) => ({
+                ...prev,
+                [file.name]: KIMI_CONFIG.buildErrorState(message, status),
+              }));
+            }
+            break;
+          default:
+            break;
+        }
+      }
+    };
+
+    void runSequentialQuotaFetch();
 
     return () => {
-      cancelled = true;
+      if (quotaQueueRunIdRef.current === currentRunId) {
+        quotaQueueRunIdRef.current += 1;
+      }
     };
   }, [
-    antigravityQuota,
-    claudeQuota,
-    codexQuota,
+    authPool.activePath,
+    authPool.authDir,
     connectionStatus,
-    currentPoolFiles,
-    geminiCliQuota,
-    kimiQuota,
+    viewPath,
+    viewedPoolFiles,
     setAntigravityQuota,
     setClaudeQuota,
     setCodexQuota,
@@ -342,10 +649,47 @@ export function AuthPoolPage() {
     () => normalizePathForCompare(currentDisplayPath || authPool.activePath || authPool.authDir),
     [authPool.activePath, authPool.authDir, currentDisplayPath]
   );
-  const currentStrategy = useMemo<RoutingStrategy>(() => {
-    if (!currentPathKey) return authPool.currentStrategy;
-    return authPool.routingStrategyByPath[currentPathKey] ?? authPool.currentStrategy;
-  }, [authPool.currentStrategy, authPool.routingStrategyByPath, currentPathKey]);
+  useEffect(() => {
+    const fallbackPath =
+      currentDisplayPath || authPool.activePath || authPool.authDir || authPool.paths[0] || '';
+
+    setViewPath((previousPath) => {
+      const normalizedPrevious = normalizePathForCompare(previousPath);
+      if (normalizedPrevious) {
+        const matchedPath = authPool.paths.find((path) => authPoolPathsEqual(path, previousPath));
+        if (matchedPath) {
+          return matchedPath;
+        }
+      }
+
+      return fallbackPath;
+    });
+  }, [authPool.activePath, authPool.authDir, authPool.paths, currentDisplayPath]);
+
+  const viewedDisplayPath = useMemo(() => {
+    const normalizedViewPath = normalizePathForCompare(viewPath);
+    if (normalizedViewPath) {
+      return authPool.paths.find((path) => authPoolPathsEqual(path, viewPath)) ?? viewPath;
+    }
+
+    return currentDisplayPath || authPool.activePath || authPool.authDir;
+  }, [authPool.activePath, authPool.authDir, authPool.paths, currentDisplayPath, viewPath]);
+  const viewedPathKey = useMemo(
+    () => normalizePathForCompare(viewedDisplayPath || currentDisplayPath || authPool.authDir),
+    [authPool.authDir, currentDisplayPath, viewedDisplayPath]
+  );
+  const isViewingCurrent = useMemo(() => {
+    if (!viewedPathKey || !currentPathKey) {
+      return true;
+    }
+    return viewedPathKey === currentPathKey;
+  }, [currentPathKey, viewedPathKey]);
+  const selectedStrategy = useMemo<RoutingStrategy>(() => {
+    if (!viewedPathKey) {
+      return authPool.currentStrategy;
+    }
+    return authPool.routingStrategyByPath[viewedPathKey] ?? authPool.currentStrategy;
+  }, [authPool.currentStrategy, authPool.routingStrategyByPath, viewedPathKey]);
 
   const strategyOptions = useMemo(
     () => [
@@ -369,11 +713,13 @@ export function AuthPoolPage() {
           path,
           currentDisplayPath || authPool.activePath || authPool.authDir
         );
+        const isViewed = authPoolPathsEqual(path, viewedDisplayPath);
         const strategy = authPool.routingStrategyByPath[normalizedPath] ?? 'round-robin';
         return {
           path,
           normalizedPath,
           isActive,
+          isViewed,
           strategy,
         };
       }),
@@ -384,14 +730,66 @@ export function AuthPoolPage() {
       authPool.paths,
       authPool.routingStrategyByPath,
       currentDisplayPath,
+      viewedDisplayPath,
     ]
   );
 
+  const loadViewedPoolFiles = useCallback(
+    async (poolState: AuthPoolState, preferredPath?: string) => {
+      if (connectionStatus !== 'connected') {
+        setViewedPoolFiles([]);
+        setFilesLoading(false);
+        return;
+      }
+
+      const targetPath =
+        resolveAuthPoolDisplayPath(poolState, preferredPath) ||
+        resolveAuthPoolDisplayPath(poolState) ||
+        poolState.activePath ||
+        poolState.authDir;
+      const activePath =
+        resolveAuthPoolDisplayPath(poolState) || poolState.activePath || poolState.authDir;
+      const requestId = filesRequestIdRef.current + 1;
+      filesRequestIdRef.current = requestId;
+      setFilesLoading(true);
+
+      try {
+        const response =
+          targetPath && activePath && authPoolPathsEqual(targetPath, activePath)
+            ? await authFilesApi.list()
+            : await authPoolApi.listFiles(targetPath);
+
+        if (filesRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        setViewedPoolFiles(response?.files ?? []);
+      } catch (err: unknown) {
+        if (filesRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const message = err instanceof Error ? err.message : t('notification.refresh_failed');
+        setViewedPoolFiles([]);
+        setError(message);
+      } finally {
+        if (filesRequestIdRef.current === requestId) {
+          setFilesLoading(false);
+        }
+      }
+    },
+    [connectionStatus, t]
+  );
+
+  useEffect(() => {
+    void loadViewedPoolFiles(authPool, viewedDisplayPath || viewPath);
+  }, [authPool, loadViewedPoolFiles, viewPath, viewedDisplayPath]);
+
   const filteredFiles = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    if (!normalizedSearch) return currentPoolFiles;
-    return currentPoolFiles.filter((file) => buildSearchText(file).includes(normalizedSearch));
-  }, [currentPoolFiles, search]);
+    if (!normalizedSearch) return viewedPoolFiles;
+    return viewedPoolFiles.filter((file) => buildSearchText(file).includes(normalizedSearch));
+  }, [viewedPoolFiles, search]);
 
   const runWithRefresh = useCallback(
     async (action: () => Promise<AuthPoolState>, successKey: string) => {
@@ -400,9 +798,8 @@ export function AuthPoolPage() {
       try {
         const nextState = await action();
         await waitForHotReload();
-        const authFilesResponse = await authFilesApi.list().catch(() => ({ files: [] }));
         setAuthPool(nextState);
-        setCurrentPoolFiles(authFilesResponse?.files ?? []);
+        await loadViewedPoolFiles(nextState, viewedDisplayPath || viewPath);
         await fetchConfig(undefined, true).catch(() => null);
         showNotification(t(successKey), 'success');
       } catch (err: unknown) {
@@ -413,7 +810,7 @@ export function AuthPoolPage() {
         setSaving(false);
       }
     },
-    [fetchConfig, showNotification, t]
+    [fetchConfig, loadViewedPoolFiles, showNotification, t, viewPath, viewedDisplayPath]
   );
 
   const handleAddPath = useCallback(() => {
@@ -422,9 +819,15 @@ export function AuthPoolPage() {
     void runWithRefresh(async () => {
       const nextState = await authPoolApi.addPath(nextPath);
       setDraftPath('');
+      setViewPath(resolveAuthPoolDisplayPath(nextState, nextPath) || nextPath);
       return nextState;
     }, 'auth_pool.notifications.path_added');
   }, [draftPath, runWithRefresh]);
+
+  const handleViewPath = useCallback((path: string) => {
+    if (!path) return;
+    setViewPath(path);
+  }, []);
 
   const handleSwitchPath = useCallback(
     (path: string) => {
@@ -434,10 +837,11 @@ export function AuthPoolPage() {
       ) {
         return;
       }
-      void runWithRefresh(
-        () => authPoolApi.setCurrent(path),
-        'auth_pool.notifications.path_switched'
-      );
+      void runWithRefresh(async () => {
+        const nextState = await authPoolApi.setCurrent(path);
+        setViewPath(resolveAuthPoolDisplayPath(nextState, path) || path);
+        return nextState;
+      }, 'auth_pool.notifications.path_switched');
     },
     [authPool.activePath, authPool.authDir, currentDisplayPath, runWithRefresh]
   );
@@ -456,18 +860,23 @@ export function AuthPoolPage() {
   const handleStrategyChange = useCallback(
     (value: string) => {
       const nextStrategy: RoutingStrategy = value === 'fill-first' ? 'fill-first' : 'round-robin';
-      const targetPath = currentDisplayPath || authPool.activePath || authPool.authDir;
+      const targetPath =
+        viewedDisplayPath || currentDisplayPath || authPool.activePath || authPool.authDir;
       if (!targetPath) return;
       void runWithRefresh(
         () => authPoolApi.setStrategy(nextStrategy, targetPath),
         'auth_pool.notifications.strategy_saved'
       );
     },
-    [authPool.activePath, authPool.authDir, currentDisplayPath, runWithRefresh]
+    [authPool.activePath, authPool.authDir, currentDisplayPath, runWithRefresh, viewedDisplayPath]
   );
 
   const handleFileToggle = useCallback(
     async (file: AuthFileItem) => {
+      if (!isViewingCurrent) {
+        return;
+      }
+
       const fileName = file.name?.trim();
       if (!fileName) return;
 
@@ -476,8 +885,7 @@ export function AuthPoolPage() {
       const nextDisabled = file.disabled !== true;
       try {
         await authFilesApi.setStatus(fileName, nextDisabled);
-        const authFilesResponse = await authFilesApi.list();
-        setCurrentPoolFiles(authFilesResponse?.files ?? []);
+        await loadViewedPoolFiles(authPool, viewedDisplayPath || viewPath);
         showNotification(
           nextDisabled
             ? t('auth_pool.notifications.auth_file_disabled')
@@ -492,7 +900,15 @@ export function AuthPoolPage() {
         setSaving(false);
       }
     },
-    [showNotification, t]
+    [
+      authPool,
+      isViewingCurrent,
+      loadViewedPoolFiles,
+      showNotification,
+      t,
+      viewPath,
+      viewedDisplayPath,
+    ]
   );
 
   const renderFileMeta = useCallback(
@@ -513,10 +929,12 @@ export function AuthPoolPage() {
     [t]
   );
 
-  const renderFileQuota = useCallback(
-    (file: AuthFileItem) => {
+  const renderFileQuotaBadges = useCallback(
+    (file: AuthFileItem): QuotaMetricBadge[] => {
       const quotaType = resolveQuotaType(file);
-      if (!quotaType) return '';
+      if (!quotaType) {
+        return [];
+      }
 
       const quotaMap =
         quotaType === 'antigravity'
@@ -529,20 +947,27 @@ export function AuthPoolPage() {
                 ? geminiCliQuota
                 : kimiQuota;
 
-      return formatQuotaSummary(quotaType, quotaMap[file.name] as QuotaStateLike);
+      return buildQuotaMetricBadges(file, quotaType, quotaMap[file.name] as QuotaStateLike, t);
     },
-    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota]
+    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, t]
   );
 
-  const totalFiles = currentPoolFiles.length;
+  const totalFiles = viewedPoolFiles.length;
   const enabledFiles = useMemo(
-    () => currentPoolFiles.filter((file) => file.disabled !== true).length,
-    [currentPoolFiles]
+    () => viewedPoolFiles.filter((file) => file.disabled !== true).length,
+    [viewedPoolFiles]
   );
   const disabledFiles = totalFiles - enabledFiles;
-  const currentPoolName = useMemo(
+  const activePoolName = useMemo(
     () => getAuthPoolName(currentDisplayPath || authPool.activePath || authPool.authDir),
     [authPool.activePath, authPool.authDir, currentDisplayPath]
+  );
+  const viewedPoolName = useMemo(
+    () =>
+      getAuthPoolName(
+        viewedDisplayPath || currentDisplayPath || authPool.activePath || authPool.authDir
+      ),
+    [authPool.activePath, authPool.authDir, currentDisplayPath, viewedDisplayPath]
   );
   const hasSearch = search.trim().length > 0;
 
@@ -586,11 +1011,26 @@ export function AuthPoolPage() {
                           {currentDisplayPath || t('common.not_set')}
                         </div>
                       </div>
-                      <span className={`${styles.badge} ${styles.badgeActive}`}>
-                        {t('auth_pool.single_active_badge')}
-                      </span>
+                      <div className={styles.badges}>
+                        <span className={`${styles.badge} ${styles.badgeActive}`}>
+                          {t('auth_pool.single_active_badge')}
+                        </span>
+                        {!isViewingCurrent && viewedDisplayPath ? (
+                          <span className={`${styles.badge} ${styles.badgeViewed}`}>
+                            {t('auth_pool.viewing_badge')}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <div className={styles.help}>{t('auth_pool.single_active_notice')}</div>
+                    {!isViewingCurrent && viewedDisplayPath ? (
+                      <div className={styles.info}>
+                        {t('auth_pool.view_mode_notice', {
+                          active: currentDisplayPath || t('common.not_set'),
+                          viewed: viewedDisplayPath,
+                        })}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className={styles.addRow}>
@@ -617,7 +1057,9 @@ export function AuthPoolPage() {
                       {pathItems.map((item) => (
                         <div
                           key={item.normalizedPath || item.path}
-                          className={`${styles.pathItem} ${item.isActive ? styles.pathItemActive : ''}`}
+                          className={`${styles.pathItem} ${item.isActive ? styles.pathItemActive : ''} ${
+                            item.isViewed ? styles.pathItemViewed : ''
+                          }`}
                         >
                           <div className={styles.pathRow}>
                             <div className={styles.pathCopy}>
@@ -637,9 +1079,25 @@ export function AuthPoolPage() {
                                         'config_management.visual.sections.network.strategy_round_robin'
                                       )}
                                 </span>
+                                {item.isViewed ? (
+                                  <span className={`${styles.badge} ${styles.badgeViewed}`}>
+                                    {t('auth_pool.viewing_badge')}
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                             <div className={styles.rowActions}>
+                              <Button
+                                type="button"
+                                variant={item.isViewed ? 'secondary' : 'ghost'}
+                                size="sm"
+                                disabled={loading}
+                                onClick={() => handleViewPath(item.path)}
+                              >
+                                {item.isViewed
+                                  ? t('auth_pool.viewing_action')
+                                  : t('auth_pool.view_action')}
+                              </Button>
                               <Button
                                 type="button"
                                 variant={item.isActive ? 'primary' : 'ghost'}
@@ -673,19 +1131,33 @@ export function AuthPoolPage() {
             </div>
 
             <div className={styles.stack}>
-              <Card title={t('auth_pool.current_strategy')}>
+              <Card
+                title={
+                  isViewingCurrent ? t('auth_pool.current_strategy') : t('auth_pool.view_strategy')
+                }
+              >
                 <div className={styles.cardSection}>
                   <div className={styles.summaryRow}>
                     <div className={styles.summaryCopy}>
-                      <div className={styles.label}>{t('auth_pool.current_strategy')}</div>
-                      <div className={styles.help}>{t('auth_pool.current_strategy_help')}</div>
+                      <div className={styles.label}>
+                        {isViewingCurrent
+                          ? t('auth_pool.current_strategy')
+                          : t('auth_pool.view_strategy')}
+                      </div>
+                      <div className={styles.help}>
+                        {isViewingCurrent
+                          ? t('auth_pool.current_strategy_help')
+                          : t('auth_pool.view_strategy_help', {
+                              path: viewedDisplayPath || t('common.not_set'),
+                            })}
+                      </div>
                     </div>
                   </div>
                   <Select
-                    value={currentStrategy}
+                    value={selectedStrategy}
                     options={strategyOptions}
                     onChange={handleStrategyChange}
-                    disabled={disableControls || !currentPathKey}
+                    disabled={disableControls || !viewedPathKey}
                   />
                 </div>
               </Card>
@@ -697,18 +1169,28 @@ export function AuthPoolPage() {
                 <div className={styles.cardSection}>
                   <div className={styles.statusGrid}>
                     <div className={styles.statusTile}>
-                      <div className={styles.statusLabel}>{t('auth_pool.current_pool_name')}</div>
+                      <div className={styles.statusLabel}>{t('auth_pool.viewing_pool_name')}</div>
                       <div className={styles.statusValue}>
-                        {currentPoolName || t('common.not_set')}
+                        {viewedPoolName || t('common.not_set')}
                       </div>
                     </div>
                     <div className={styles.statusTile}>
-                      <div className={styles.statusLabel}>{t('auth_pool.enabled_status')}</div>
-                      <div className={styles.statusValue}>{t('auth_pool.current_in_use')}</div>
+                      <div className={styles.statusLabel}>{t('auth_pool.view_mode_status')}</div>
+                      <div className={styles.statusValue}>
+                        {isViewingCurrent
+                          ? t('auth_pool.current_in_use')
+                          : t('auth_pool.viewing_only')}
+                      </div>
                     </div>
                     <div className={styles.statusTile}>
                       <div className={styles.statusLabel}>{t('auth_pool.path_count')}</div>
                       <div className={styles.statusValue}>{pathItems.length}</div>
+                    </div>
+                    <div className={styles.statusTile}>
+                      <div className={styles.statusLabel}>{t('auth_pool.current_pool_name')}</div>
+                      <div className={styles.statusValue}>
+                        {activePoolName || t('common.not_set')}
+                      </div>
                     </div>
                     <div className={styles.statusTile}>
                       <div className={styles.statusLabel}>
@@ -735,10 +1217,22 @@ export function AuthPoolPage() {
           </div>
 
           <Card
-            title={t('auth_pool.current_auth_files_title')}
+            title={
+              isViewingCurrent
+                ? t('auth_pool.current_auth_files_title')
+                : t('auth_pool.runtime_auth_files_title')
+            }
             extra={loading ? t('common.loading') : `${totalFiles}`}
           >
             <div className={styles.cardSection}>
+              {!isViewingCurrent && viewedDisplayPath ? (
+                <div className={styles.info}>
+                  {t('auth_pool.view_mode_files_notice', {
+                    viewed: viewedDisplayPath,
+                    active: currentDisplayPath || t('common.not_set'),
+                  })}
+                </div>
+              ) : null}
               <div className={styles.searchRow}>
                 <Input
                   label={t('auth_pool.search_label')}
@@ -784,22 +1278,40 @@ export function AuthPoolPage() {
                         <div className={styles.fileCopy}>
                           <div className={styles.fileHeaderRow}>
                             <div className={styles.fileName}>{file.name}</div>
-                            <div className={styles.badges}>
-                              <span className={styles.badge}>
-                                {getTypeLabel(t, file.type || 'unknown')}
-                              </span>
-                              {resolvePlanType(file) ? (
-                                <span className={styles.badge}>{resolvePlanType(file)}</span>
-                              ) : null}
-                              {parsePriorityValue(file.priority ?? file['priority']) !==
-                              undefined ? (
-                                <span className={styles.badge}>
-                                  P{parsePriorityValue(file.priority ?? file['priority'])}
+                            <div className={styles.fileMetricRail}>
+                              {renderFileQuotaBadges(file).map((badge) => (
+                                <span
+                                  key={`${file.name}-${badge.key}`}
+                                  className={[
+                                    styles.metricBadge,
+                                    badge.large ? styles.metricBadgeLarge : '',
+                                    badge.tone === 'premium' ? styles.metricBadgePremium : '',
+                                    badge.tone === 'provider' ? styles.metricBadgeProvider : '',
+                                    badge.tone === 'success' ? styles.metricBadgeSuccess : '',
+                                    badge.tone === 'warning' ? styles.metricBadgeWarning : '',
+                                    badge.tone === 'danger' ? styles.metricBadgeDanger : '',
+                                    badge.slot === 'provider' ? styles.metricBadgeSlotProvider : '',
+                                    badge.slot === 'premium' ? styles.metricBadgeSlotPremium : '',
+                                    badge.slot === 'priority' ? styles.metricBadgeSlotPriority : '',
+                                    badge.slot === 'five-hour'
+                                      ? styles.metricBadgeSlotFiveHour
+                                      : '',
+                                    badge.slot === 'seven-day'
+                                      ? styles.metricBadgeSlotSevenDay
+                                      : '',
+                                    badge.slot === 'secondary'
+                                      ? styles.metricBadgeSlotSecondary
+                                      : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')}
+                                >
+                                  <span className={styles.metricBadgeLabel}>{badge.label}</span>
+                                  {badge.value ? (
+                                    <span className={styles.metricBadgeValue}>{badge.value}</span>
+                                  ) : null}
                                 </span>
-                              ) : null}
-                              {renderFileQuota(file) ? (
-                                <span className={styles.badge}>{renderFileQuota(file)}</span>
-                              ) : null}
+                              ))}
                             </div>
                           </div>
                           <div className={styles.fileMeta}>{renderFileMeta(file)}</div>
@@ -812,11 +1324,13 @@ export function AuthPoolPage() {
                                 Auth #{normalizeAuthIndex(file['auth_index'] ?? file.authIndex)}
                               </span>
                             ) : null}
-                            <span className={styles.fileExtraItem}>
-                              {t('stats.success')}/{t('stats.failure')}:{' '}
-                              {resolveAuthFileStats(file, keyStats).success}/
-                              {resolveAuthFileStats(file, keyStats).failure}
-                            </span>
+                            {isViewingCurrent ? (
+                              <span className={styles.fileExtraItem}>
+                                {t('stats.success')}/{t('stats.failure')}:{' '}
+                                {resolveAuthFileStats(file, keyStats).success}/
+                                {resolveAuthFileStats(file, keyStats).failure}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -832,7 +1346,7 @@ export function AuthPoolPage() {
                           type="button"
                           size="sm"
                           variant="ghost"
-                          disabled={disableControls}
+                          disabled={disableControls || !isViewingCurrent}
                           onClick={() => void handleFileToggle(file)}
                         >
                           {file.disabled === true

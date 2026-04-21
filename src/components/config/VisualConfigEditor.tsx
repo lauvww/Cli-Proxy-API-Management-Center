@@ -69,6 +69,10 @@ interface VisualConfigEditorProps {
   values: VisualConfigValues;
   validationErrors?: VisualConfigValidationErrors;
   hasPayloadValidationErrors?: boolean;
+  modelCatalogRuntime?: {
+    remoteRefreshEffective?: boolean;
+    remoteRefreshForcedByCli?: string;
+  };
   disabled?: boolean;
   onChange: (values: Partial<VisualConfigValues>) => void;
 }
@@ -211,6 +215,7 @@ export function VisualConfigEditor({
   values,
   validationErrors,
   hasPayloadValidationErrors = false,
+  modelCatalogRuntime,
   disabled = false,
   onChange,
 }: VisualConfigEditorProps) {
@@ -301,6 +306,12 @@ export function VisualConfigEditor({
     t,
     validationErrors?.['streaming.nonstreamKeepaliveInterval']
   );
+  const modelCatalogCliOverrideFlag = modelCatalogRuntime?.remoteRefreshForcedByCli;
+  const modelCatalogCliOverrideNote = modelCatalogCliOverrideFlag
+    ? t('config_management.visual.sections.network.model_catalog_remote_refresh_cli_override', {
+        flag: modelCatalogCliOverrideFlag,
+      })
+    : null;
 
   const handleApiKeysTextChange = useCallback(
     (apiKeysText: string) => onChange({ apiKeysText }),
@@ -1104,9 +1115,44 @@ export function VisualConfigEditor({
                     }
                   />
                 </FieldShell>
+                <ToggleRow
+                  title={t(
+                    'config_management.visual.sections.network.model_catalog_remote_refresh'
+                  )}
+                  description={t(
+                    'config_management.visual.sections.network.model_catalog_remote_refresh_desc'
+                  )}
+                  checked={values.modelCatalogRemoteRefreshEnabled}
+                  disabled={disabled}
+                  onChange={(modelCatalogRemoteRefreshEnabled) =>
+                    onChange({ modelCatalogRemoteRefreshEnabled })
+                  }
+                />
+                {modelCatalogCliOverrideNote ? (
+                  <div className={styles.fieldHint}>{modelCatalogCliOverrideNote}</div>
+                ) : null}
+                <ToggleRow
+                  title={t('config_management.visual.sections.network.session_affinity')}
+                  description={t(
+                    'config_management.visual.sections.network.session_affinity_desc'
+                  )}
+                  checked={values.sessionAffinity}
+                  disabled={disabled}
+                  onChange={(sessionAffinity) => onChange({ sessionAffinity })}
+                />
               </SectionGrid>
 
               <SectionGrid>
+                <Input
+                  label={t('config_management.visual.sections.network.session_affinity_ttl')}
+                  placeholder="1h"
+                  value={values.sessionAffinityTtl}
+                  onChange={(e) => onChange({ sessionAffinityTtl: e.target.value })}
+                  disabled={disabled}
+                  hint={t(
+                    'config_management.visual.sections.network.session_affinity_ttl_hint'
+                  )}
+                />
                 <ToggleRow
                   title={t('config_management.visual.sections.network.force_model_prefix')}
                   description={t(
