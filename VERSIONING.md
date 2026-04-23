@@ -29,9 +29,10 @@ This UI repository follows the backend fork version.
 3. Commit the version bump
 4. Run `npm run build`
 5. Publish `management.html`
-6. When you want the update checker to prefer GitHub releases, create a matching Git tag and release such as `v2.0.0`
+6. When you want the update checker to prefer GitHub releases, create a matching Git tag and release such as `v2.2.1`
 
 ## Notes
 
 - For coordinated releases, update the backend `VERSION`, frontend `VERSION`, and frontend `package.json` together.
 - The Config page now depends on runtime metadata returned by the backend for features such as remote model catalog refresh overrides and live auth-index mapping, so documentation and release notes should assume matched backend and UI versions.
+- The current coordinated stable line is `2.2.1`, which reflects the multi-auth-pool runtime, watcher hot-apply behavior, and the current `/v1/models` global-registry-view semantics used by the UI.

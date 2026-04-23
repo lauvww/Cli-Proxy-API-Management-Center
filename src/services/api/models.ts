@@ -80,10 +80,11 @@ const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): s
 };
 
 export const modelsApi = {
-  /**
-   * Fetch available models from /v1/models endpoint (for system info page)
-   */
-  async fetchModels(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
+  async fetchModelsWithMeta(
+    baseUrl: string,
+    apiKey?: string,
+    headers: Record<string, string> = {}
+  ) {
     const endpoint = buildV1ModelsEndpoint(baseUrl);
     if (!endpoint) {
       throw new Error('Invalid base url');
@@ -95,10 +96,22 @@ export const modelsApi = {
     }
 
     const response = await axios.get(endpoint, {
-      headers: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined
+      headers: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
     });
     const payload = response.data?.data ?? response.data?.models ?? response.data;
-    return normalizeModelList(payload, { dedupe: true });
+    return {
+      models: normalizeModelList(payload, { dedupe: true }),
+      scope: String(response.headers?.['x-cpa-models-scope'] ?? '').trim(),
+      mode: String(response.headers?.['x-cpa-models-mode'] ?? '').trim(),
+    };
+  },
+
+  /**
+   * Fetch available models from /v1/models endpoint (for system info page)
+   */
+  async fetchModels(baseUrl: string, apiKey?: string, headers: Record<string, string> = {}) {
+    const result = await this.fetchModelsWithMeta(baseUrl, apiKey, headers);
+    return result.models;
   },
 
   /**
@@ -123,7 +136,7 @@ export const modelsApi = {
     const result = await apiCallApi.request({
       method: 'GET',
       url: endpoint,
-      header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined
+      header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
     });
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -155,7 +168,7 @@ export const modelsApi = {
     const result = await apiCallApi.request({
       method: 'GET',
       url: endpoint,
-      header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined
+      header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
     });
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -213,7 +226,7 @@ export const modelsApi = {
       const result = await apiCallApi.request({
         method: 'GET',
         url: endpoint,
-        header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined
+        header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
       });
 
       if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -270,7 +283,7 @@ export const modelsApi = {
         const result = await apiCallApi.request({
           method: 'GET',
           url: url.toString(),
-          header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined
+          header: Object.keys(resolvedHeaders).length ? resolvedHeaders : undefined,
         });
 
         if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -292,7 +305,9 @@ export const modelsApi = {
         });
 
         const nextToken =
-          isRecord(payload) && typeof payload.nextPageToken === 'string' ? payload.nextPageToken : '';
+          isRecord(payload) && typeof payload.nextPageToken === 'string'
+            ? payload.nextPageToken
+            : '';
         if (!nextToken) {
           break;
         }

@@ -2,12 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
-import {
-  IconKey,
-  IconBot,
-  IconFileText,
-  IconSatellite
-} from '@/components/ui/icons';
+import { IconKey, IconBot, IconFileText, IconSatellite } from '@/components/ui/icons';
 import { useAuthStore, useConfigStore, useModelsStore, useNotificationStore } from '@/stores';
 import { apiCallApi, apiKeysApi, providersApi, authFilesApi } from '@/services/api';
 import type { AuthFileItem } from '@/types';
@@ -51,8 +46,7 @@ interface CodexQuotaCheckResult {
 const INVALID_SCAN_CONCURRENCY = 20;
 const INVALID_SCAN_TIMEOUT_MS = 30_000;
 const INVALID_SCAN_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-const INVALID_SCAN_USER_AGENT =
-  'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal';
+const INVALID_SCAN_USER_AGENT = 'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal';
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -155,6 +149,7 @@ export function DashboardPage() {
 
   const models = useModelsStore((state) => state.models);
   const modelsLoading = useModelsStore((state) => state.loading);
+  const modelsScopeMode = useModelsStore((state) => state.scopeMode);
   const fetchModelsFromStore = useModelsStore((state) => state.fetchModels);
 
   const [stats, setStats] = useState<{
@@ -162,14 +157,14 @@ export function DashboardPage() {
     authFiles: number | null;
   }>({
     apiKeys: null,
-    authFiles: null
+    authFiles: null,
   });
 
   const [providerStats, setProviderStats] = useState<ProviderStats>({
     gemini: null,
     codex: null,
     claude: null,
-    openai: null
+    openai: null,
   });
 
   const [loading, setLoading] = useState(true);
@@ -181,7 +176,7 @@ export function DashboardPage() {
     deleted: 0,
     errors: 0,
     lastAction: null,
-    lastRunAt: null
+    lastRunAt: null,
   });
 
   // Time-of-day state for dynamic greeting
@@ -258,8 +253,7 @@ export function DashboardPage() {
 
     try {
       const apiKeys = await resolveApiKeysForModels();
-      const primaryKey = apiKeys[0];
-      await fetchModelsFromStore(apiBase, primaryKey);
+      await fetchModelsFromStore(apiBase, apiKeys);
     } catch {
       // Ignore model fetch errors on dashboard
     }
@@ -269,25 +263,26 @@ export function DashboardPage() {
     const fetchStats = async () => {
       setLoading(true);
       try {
-        const [keysRes, filesRes, geminiRes, codexRes, claudeRes, openaiRes] = await Promise.allSettled([
-          apiKeysApi.list(),
-          authFilesApi.list(),
-          providersApi.getGeminiKeys(),
-          providersApi.getCodexConfigs(),
-          providersApi.getClaudeConfigs(),
-          providersApi.getOpenAIProviders()
-        ]);
+        const [keysRes, filesRes, geminiRes, codexRes, claudeRes, openaiRes] =
+          await Promise.allSettled([
+            apiKeysApi.list(),
+            authFilesApi.list(),
+            providersApi.getGeminiKeys(),
+            providersApi.getCodexConfigs(),
+            providersApi.getClaudeConfigs(),
+            providersApi.getOpenAIProviders(),
+          ]);
 
         setStats({
           apiKeys: keysRes.status === 'fulfilled' ? keysRes.value.length : null,
-          authFiles: filesRes.status === 'fulfilled' ? filesRes.value.files.length : null
+          authFiles: filesRes.status === 'fulfilled' ? filesRes.value.files.length : null,
         });
 
         setProviderStats({
           gemini: geminiRes.status === 'fulfilled' ? geminiRes.value.length : null,
           codex: codexRes.status === 'fulfilled' ? codexRes.value.length : null,
           claude: claudeRes.status === 'fulfilled' ? claudeRes.value.length : null,
-          openai: openaiRes.status === 'fulfilled' ? openaiRes.value.length : null
+          openai: openaiRes.status === 'fulfilled' ? openaiRes.value.length : null,
         });
       } finally {
         setLoading(false);
@@ -320,7 +315,7 @@ export function DashboardPage() {
           disabled: 0,
           errors: 0,
           lastAction: 'scan',
-          lastRunAt: Date.now()
+          lastRunAt: Date.now(),
         }));
         showNotification(t('dashboard.codex_scan_no_targets'), 'info');
         return;
@@ -336,7 +331,7 @@ export function DashboardPage() {
             return {
               name,
               statusCode: -1,
-              errorMessage: 'Missing auth index'
+              errorMessage: 'Missing auth index',
             };
           }
 
@@ -344,7 +339,7 @@ export function DashboardPage() {
           const header: Record<string, string> = {
             Authorization: 'Bearer $TOKEN$',
             'Content-Type': 'application/json',
-            'User-Agent': INVALID_SCAN_USER_AGENT
+            'User-Agent': INVALID_SCAN_USER_AGENT,
           };
           if (accountId) {
             header['Chatgpt-Account-Id'] = accountId;
@@ -356,22 +351,18 @@ export function DashboardPage() {
                 authIndex,
                 method: 'GET',
                 url: INVALID_SCAN_USAGE_URL,
-                header
+                header,
               },
               { timeout: INVALID_SCAN_TIMEOUT_MS }
             );
             return { name, statusCode: result.statusCode };
           } catch (err: unknown) {
             const message =
-              err instanceof Error
-                ? err.message
-                : typeof err === 'string'
-                  ? err
-                  : 'Request failed';
+              err instanceof Error ? err.message : typeof err === 'string' ? err : 'Request failed';
             return {
               name,
               statusCode: -1,
-              errorMessage: message
+              errorMessage: message,
             };
           }
         }
@@ -412,7 +403,7 @@ export function DashboardPage() {
         disabled: disabledCount,
         errors: totalErrorCount,
         lastAction: 'scan',
-        lastRunAt: Date.now()
+        lastRunAt: Date.now(),
       }));
 
       if (!invalidNames.length) {
@@ -422,7 +413,7 @@ export function DashboardPage() {
           t('dashboard.codex_scan_done', {
             checked: checkResults.length,
             invalid: invalidNames.length,
-            disabled: disabledCount
+            disabled: disabledCount,
           }),
           'success'
         );
@@ -432,7 +423,7 @@ export function DashboardPage() {
             checked: checkResults.length,
             invalid: invalidNames.length,
             disabled: disabledCount,
-            failed: invalidNames.length - disabledCount
+            failed: invalidNames.length - disabledCount,
           }),
           'warning'
         );
@@ -442,7 +433,7 @@ export function DashboardPage() {
         showNotification(
           t('dashboard.codex_scan_error_count', {
             checkErrors: checkMessageErrorCount,
-            disableErrors: disableErrorCount
+            disableErrors: disableErrorCount,
           }),
           'warning'
         );
@@ -473,7 +464,7 @@ export function DashboardPage() {
           deleted: 0,
           errors: 0,
           lastAction: 'delete',
-          lastRunAt: Date.now()
+          lastRunAt: Date.now(),
         }));
         showNotification(t('dashboard.codex_delete_no_targets'), 'info');
         return;
@@ -500,19 +491,20 @@ export function DashboardPage() {
         deleted: deletedCount,
         errors: deleteErrorCount,
         lastAction: 'delete',
-        lastRunAt: Date.now()
+        lastRunAt: Date.now(),
       }));
 
       setStats((prev) => ({
         ...prev,
-        authFiles: prev.authFiles !== null ? Math.max(prev.authFiles - deletedCount, 0) : prev.authFiles
+        authFiles:
+          prev.authFiles !== null ? Math.max(prev.authFiles - deletedCount, 0) : prev.authFiles,
       }));
 
       if (deletedCount === targets.length && deleteErrorCount === 0) {
         showNotification(
           t('dashboard.codex_delete_done', {
             found: targets.length,
-            deleted: deletedCount
+            deleted: deletedCount,
           }),
           'success'
         );
@@ -521,7 +513,7 @@ export function DashboardPage() {
           t('dashboard.codex_delete_partial', {
             found: targets.length,
             deleted: deletedCount,
-            failed: targets.length - deletedCount
+            failed: targets.length - deletedCount,
           }),
           'warning'
         );
@@ -559,7 +551,7 @@ export function DashboardPage() {
       icon: <IconKey size={24} />,
       path: '/config',
       loading: loading && stats.apiKeys === null,
-      sublabel: t('nav.config_management')
+      sublabel: t('nav.config_management'),
     },
     {
       label: t('nav.ai_providers'),
@@ -572,9 +564,9 @@ export function DashboardPage() {
             gemini: providerStats.gemini ?? '-',
             codex: providerStats.codex ?? '-',
             claude: providerStats.claude ?? '-',
-            openai: providerStats.openai ?? '-'
+            openai: providerStats.openai ?? '-',
           })
-        : undefined
+        : undefined,
     },
     {
       label: t('nav.auth_files'),
@@ -582,7 +574,7 @@ export function DashboardPage() {
       icon: <IconFileText size={24} />,
       path: '/auth-files',
       loading: loading && stats.authFiles === null,
-      sublabel: t('dashboard.oauth_credentials')
+      sublabel: t('dashboard.oauth_credentials'),
     },
     {
       label: t('dashboard.available_models'),
@@ -590,8 +582,13 @@ export function DashboardPage() {
       icon: <IconSatellite size={24} />,
       path: '/system',
       loading: modelsLoading,
-      sublabel: t('dashboard.available_models_desc')
-    }
+      sublabel:
+        modelsScopeMode === 'global-registry-view'
+          ? t('dashboard.available_models_scope_global', {
+              defaultValue: 'Global registry view',
+            })
+          : t('dashboard.available_models_desc'),
+    },
   ];
 
   const routingStrategyRaw = config?.routingStrategy?.trim() || '';
@@ -618,12 +615,12 @@ export function DashboardPage() {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
-    day: 'numeric'
+    day: 'numeric',
   });
 
   const formattedTime = currentTime.toLocaleTimeString(i18n.language, {
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 
   const codexSummaryLastRunText = codexSummary.lastRunAt
@@ -702,9 +699,7 @@ export function DashboardPage() {
             >
               <div className={styles.bentoIcon}>{stat.icon}</div>
               <div className={styles.bentoContent}>
-                <span className={styles.bentoValue}>
-                  {stat.loading ? '...' : stat.value}
-                </span>
+                <span className={styles.bentoValue}>{stat.loading ? '...' : stat.value}</span>
                 <span className={styles.bentoLabel}>{stat.label}</span>
                 {stat.sublabel && !stat.loading && (
                   <span className={styles.bentoSublabel}>{stat.sublabel}</span>
@@ -724,7 +719,7 @@ export function DashboardPage() {
               <span className={styles.bentoSublabel}>
                 {t('dashboard.codex_last_run', {
                   action: codexSummaryActionText,
-                  time: codexSummaryLastRunText
+                  time: codexSummaryLastRunText,
                 })}
               </span>
             </div>
@@ -775,29 +770,43 @@ export function DashboardPage() {
           <div className={styles.configPillGrid}>
             <div className={styles.configPill}>
               <span className={styles.configPillLabel}>{t('basic_settings.debug_enable')}</span>
-              <span className={`${styles.configPillValue} ${config.debug ? styles.on : styles.off}`}>
+              <span
+                className={`${styles.configPillValue} ${config.debug ? styles.on : styles.off}`}
+              >
                 {config.debug ? t('common.yes') : t('common.no')}
               </span>
             </div>
             <div className={styles.configPill}>
-              <span className={styles.configPillLabel}>{t('basic_settings.usage_statistics_enable')}</span>
-              <span className={`${styles.configPillValue} ${config.usageStatisticsEnabled ? styles.on : styles.off}`}>
+              <span className={styles.configPillLabel}>
+                {t('basic_settings.usage_statistics_enable')}
+              </span>
+              <span
+                className={`${styles.configPillValue} ${config.usageStatisticsEnabled ? styles.on : styles.off}`}
+              >
                 {config.usageStatisticsEnabled ? t('common.yes') : t('common.no')}
               </span>
             </div>
             <div className={styles.configPill}>
-              <span className={styles.configPillLabel}>{t('basic_settings.logging_to_file_enable')}</span>
-              <span className={`${styles.configPillValue} ${config.loggingToFile ? styles.on : styles.off}`}>
+              <span className={styles.configPillLabel}>
+                {t('basic_settings.logging_to_file_enable')}
+              </span>
+              <span
+                className={`${styles.configPillValue} ${config.loggingToFile ? styles.on : styles.off}`}
+              >
                 {config.loggingToFile ? t('common.yes') : t('common.no')}
               </span>
             </div>
             <div className={styles.configPill}>
-              <span className={styles.configPillLabel}>{t('basic_settings.retry_count_label')}</span>
+              <span className={styles.configPillLabel}>
+                {t('basic_settings.retry_count_label')}
+              </span>
               <span className={styles.configPillValue}>{config.requestRetry ?? 0}</span>
             </div>
             <div className={styles.configPill}>
               <span className={styles.configPillLabel}>{t('basic_settings.ws_auth_enable')}</span>
-              <span className={`${styles.configPillValue} ${config.wsAuth ? styles.on : styles.off}`}>
+              <span
+                className={`${styles.configPillValue} ${config.wsAuth ? styles.on : styles.off}`}
+              >
                 {config.wsAuth ? t('common.yes') : t('common.no')}
               </span>
             </div>
@@ -809,7 +818,9 @@ export function DashboardPage() {
             </div>
             {config.proxyUrl && (
               <div className={`${styles.configPill} ${styles.configPillWide}`}>
-                <span className={styles.configPillLabel}>{t('basic_settings.proxy_url_label')}</span>
+                <span className={styles.configPillLabel}>
+                  {t('basic_settings.proxy_url_label')}
+                </span>
                 <span className={styles.configPillMono}>{config.proxyUrl}</span>
               </div>
             )}

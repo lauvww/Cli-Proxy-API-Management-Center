@@ -81,6 +81,7 @@ export function SystemPage() {
   const models = useModelsStore((state) => state.models);
   const modelsLoading = useModelsStore((state) => state.loading);
   const modelsError = useModelsStore((state) => state.error);
+  const modelsScopeMode = useModelsStore((state) => state.scopeMode);
   const fetchModelsFromStore = useModelsStore((state) => state.fetchModels);
 
   const [modelStatus, setModelStatus] = useState<{
@@ -189,8 +190,7 @@ export function SystemPage() {
     setModelStatus({ type: 'muted', message: t('system_info.models_loading') });
     try {
       const apiKeys = await resolveApiKeysForModels();
-      const primaryKey = apiKeys[0];
-      const list = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh);
+      const list = await fetchModelsFromStore(auth.apiBase, apiKeys, forceRefresh);
       const hasModels = list.length > 0;
       setModelStatus({
         type: hasModels ? 'success' : 'warning',
@@ -205,6 +205,13 @@ export function SystemPage() {
       setModelStatus({ type: 'error', message: text });
     }
   };
+
+  const modelsScopeHint =
+    modelsScopeMode === 'global-registry-view'
+      ? t('system_info.models_scope_global', {
+          defaultValue: 'Models are shown from the global registry view in multi auth-pool mode.',
+        })
+      : '';
 
   const handleClearLoginStorage = () => {
     showConfirmation({
@@ -469,6 +476,7 @@ export function SystemPage() {
           {modelStatus && (
             <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>
           )}
+          {modelsScopeHint ? <div className="hint">{modelsScopeHint}</div> : null}
           {modelsError && <div className="error-box">{modelsError}</div>}
           {modelsLoading ? (
             <div className="hint">{t('common.loading')}</div>

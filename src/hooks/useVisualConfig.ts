@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useReducer } from 'react';
-import { isMap, parse as parseYaml, parseDocument } from 'yaml';
+import { useCallback, useMemo, useReducer, useRef } from 'react';
+import { isMap, parseDocument } from 'yaml';
 import type {
   PayloadFilterRule,
   PayloadParamEntry,
@@ -702,10 +702,7 @@ function getNextDirtyFields(
     updateDirty('routingStrategy', nextValues.routingStrategy === baselineValues.routingStrategy);
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'sessionAffinity')) {
-    updateDirty(
-      'sessionAffinity',
-      nextValues.sessionAffinity === baselineValues.sessionAffinity
-    );
+    updateDirty('sessionAffinity', nextValues.sessionAffinity === baselineValues.sessionAffinity);
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'sessionAffinityTtl')) {
     updateDirty(
@@ -817,6 +814,10 @@ function visualConfigReducer(
 }
 
 export function useVisualConfig() {
+  const yamlLoadCacheRef = useRef<{
+    yaml: string;
+    parsed: Record<string, unknown>;
+  } | null>(null);
   const [state, dispatch] = useReducer(
     visualConfigReducer,
     undefined,
@@ -844,13 +845,23 @@ export function useVisualConfig() {
 
   const loadVisualValuesFromYaml = useCallback((yamlContent: string) => {
     try {
-      const document = parseDocument(yamlContent);
-      if (document.errors.length > 0) {
-        throw new Error(document.errors[0]?.message ?? 'Invalid YAML');
-      }
+      let parsed: Record<string, unknown> | null = null;
+      const cached = yamlLoadCacheRef.current;
+      if (cached && cached.yaml === yamlContent) {
+        parsed = cached.parsed;
+      } else {
+        const document = parseDocument(yamlContent);
+        if (document.errors.length > 0) {
+          throw new Error(document.errors[0]?.message ?? 'Invalid YAML');
+        }
 
-      const parsedRaw: unknown = parseYaml(yamlContent) || {};
-      const parsed = asRecord(parsedRaw) ?? {};
+        const parsedRaw = document.toJS();
+        parsed = asRecord(parsedRaw) ?? {};
+        yamlLoadCacheRef.current = { yaml: yamlContent, parsed };
+      }
+      if (!parsed) {
+        parsed = {};
+      }
       const apiKeysText = resolveApiKeysText(parsed);
       const tls = asRecord(parsed.tls);
       const remoteManagement = asRecord(parsed['remote-management']);

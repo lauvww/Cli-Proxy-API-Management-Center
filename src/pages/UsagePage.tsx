@@ -245,6 +245,15 @@ export function UsagePage() {
   const fetchModelsFromStore = useModelsStore((state) => state.fetchModels);
   const apiKeysCacheRef = useRef<string[]>([]);
   const [authFilesForPools, setAuthFilesForPools] = useState<AuthFileItem[]>([]);
+  const apiKeyAliasesSignature = useMemo(
+    () =>
+      JSON.stringify(
+        Object.entries(config?.apiKeyAliases ?? {}).sort(([left], [right]) =>
+          left.localeCompare(right)
+        )
+      ),
+    [config?.apiKeyAliases]
+  );
 
   // Data hook
   const [poolFilter, setPoolFilter] = useState<UsagePoolFilter>(loadPoolFilter);
@@ -331,8 +340,7 @@ export function UsagePage() {
       try {
         const apiKeys = await resolveApiKeysForModels();
         if (cancelled) return;
-        const primaryKey = apiKeys[0];
-        await fetchModelsFromStore(apiBase, primaryKey);
+        await fetchModelsFromStore(apiBase, apiKeys);
       } catch {
         // Keep usage page resilient when /v1/models is unavailable.
       }
@@ -508,6 +516,10 @@ export function UsagePage() {
     },
     connectionStatus === 'connected' ? USAGE_AUTO_REFRESH_MS : null
   );
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return;
+    void loadUsage().catch(() => {});
+  }, [apiKeyAliasesSignature, connectionStatus, loadUsage]);
   const selectedPoolAuthIndexes = useMemo(() => {
     if (!selectedPoolPath) return new Set<string>();
     const result = new Set<string>();
@@ -773,8 +785,9 @@ export function UsagePage() {
     [usageModelNames, apiModelNames]
   );
   const apiStats = useMemo(
-    () => getApiStats(poolScopedUsage, modelPrices, config?.apiKeyAliases ?? {}),
-    [config?.apiKeyAliases, modelPrices, poolScopedUsage]
+    () =>
+      getApiStats(poolScopedUsage, modelPrices, config?.apiKeyAliases ?? {}, config?.apiKeys ?? []),
+    [config?.apiKeyAliases, config?.apiKeys, modelPrices, poolScopedUsage]
   );
   const modelStats = useMemo(
     () => getModelStats(poolScopedUsage, modelPrices),
@@ -985,6 +998,8 @@ export function UsagePage() {
       <RequestEventsDetailsCard
         usage={poolScopedUsage}
         loading={effectiveLoading}
+        apiKeys={config?.apiKeys ?? []}
+        apiKeyAliases={config?.apiKeyAliases ?? {}}
         geminiKeys={config?.geminiApiKeys || []}
         claudeConfigs={config?.claudeApiKeys || []}
         codexConfigs={config?.codexApiKeys || []}

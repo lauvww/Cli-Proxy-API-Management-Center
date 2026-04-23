@@ -1027,10 +1027,10 @@ export function saveModelPrices(prices: Record<string, ModelPrice>): void {
 export function getApiStats(
   usageData: unknown,
   modelPrices: Record<string, ModelPrice>,
-  apiKeyAliases: Record<string, string> = {}
+  apiKeyAliases: Record<string, string> = {},
+  configuredApiKeys: string[] = []
 ): ApiStats[] {
   const apis = getApisRecord(usageData);
-  if (!apis) return [];
   const merged = new Map<string, ApiStats>();
 
   const resolveAPIBucketLabel = (endpoint: string): string => {
@@ -1039,39 +1039,10 @@ export function getApiStats(
       return alias;
     }
 
-    const trimmedEndpoint = endpoint.trim();
-    const localAlias =
-      typeof apiKeyAliases['sk-UJ3VkVkY5VEFinWkR'] === 'string'
-        ? apiKeyAliases['sk-UJ3VkVkY5VEFinWkR'].trim()
-        : 'Local';
-    const remoteAlias =
-      typeof apiKeyAliases['sk-H3vtFmzXhwO7D8eGP'] === 'string'
-        ? apiKeyAliases['sk-H3vtFmzXhwO7D8eGP'].trim()
-        : 'Remote';
-
-    if (
-      trimmedEndpoint === 'Codex' ||
-      trimmedEndpoint === 'sk-REPLACE-WITH-YOUR-UPSTREAM-OPENAI-KEY' ||
-      trimmedEndpoint === 'sk-UJ3VkVkY5VEFinWkR' ||
-      trimmedEndpoint === 'Local' ||
-      trimmedEndpoint === '本地'
-    ) {
-      return localAlias || 'Local';
-    }
-
-    if (
-      trimmedEndpoint === 'sk-H3vtFmzXhwO7D8eGP' ||
-      trimmedEndpoint === 'Remote' ||
-      trimmedEndpoint === '远程' ||
-      trimmedEndpoint === '杩滅▼'
-    ) {
-      return remoteAlias || 'Remote';
-    }
-
     return maskUsageSensitiveValue(endpoint) || endpoint;
   };
 
-  Object.entries(apis).forEach(([endpoint, apiData]) => {
+  Object.entries(apis ?? {}).forEach(([endpoint, apiData]) => {
     if (!isRecord(apiData)) return;
     const models: Record<
       string,
@@ -1167,6 +1138,31 @@ export function getApiStats(
     });
 
     merged.set(displayEndpoint, existing);
+  });
+
+  const normalizedConfiguredApiKeys = Array.from(
+    new Set(
+      configuredApiKeys
+        .map((apiKey) => (typeof apiKey === 'string' ? apiKey.trim() : ''))
+        .filter(Boolean)
+    )
+  );
+
+  normalizedConfiguredApiKeys.forEach((apiKey) => {
+    const displayEndpoint = resolveAPIBucketLabel(apiKey);
+    if (!displayEndpoint || merged.has(displayEndpoint)) {
+      return;
+    }
+
+    merged.set(displayEndpoint, {
+      endpoint: displayEndpoint,
+      totalRequests: 0,
+      successCount: 0,
+      failureCount: 0,
+      totalTokens: 0,
+      totalCost: 0,
+      models: {},
+    });
   });
 
   return Array.from(merged.values());

@@ -96,11 +96,12 @@ export function ConfigPage() {
     setError('');
     try {
       const data = await configFileApi.fetchConfigYaml();
-      try {
-        await useConfigStore.getState().fetchConfig(undefined, true);
-      } catch {
-        // Keep YAML editing available even if the runtime snapshot request fails.
-      }
+      void useConfigStore
+        .getState()
+        .fetchConfig(undefined, true)
+        .catch(() => {
+          // Keep YAML editing available even if the runtime snapshot request fails.
+        });
       setContent(data);
       setDirty(false);
       setDiffModalOpen(false);
@@ -147,21 +148,11 @@ export function ConfigPage() {
       loadVisualValuesFromYaml(latestContent);
 
       // Keep the global config store in sync so sidebar / other pages reflect YAML changes immediately.
-      try {
-        useConfigStore.getState().clearCache();
-        await useConfigStore.getState().fetchConfig(undefined, true);
-      } catch (refreshError: unknown) {
-        const message =
-          refreshError instanceof Error
-            ? refreshError.message
-            : typeof refreshError === 'string'
-              ? refreshError
-              : '';
-        showNotification(
-          `${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`,
-          'error'
-        );
-      }
+      useConfigStore.getState().clearCache();
+      void useConfigStore
+        .getState()
+        .fetchConfig(undefined, true)
+        .catch(() => {});
 
       showNotification(t('config_management.save_success'), 'success');
       if (commercialModeChanged) {
@@ -183,7 +174,8 @@ export function ConfigPage() {
 
     setSaving(true);
     try {
-      const latestServerYaml = await configFileApi.fetchConfigYaml();
+      const latestServerYaml =
+        activeTab === 'source' ? serverYaml || content : await configFileApi.fetchConfigYaml();
 
       if (activeTab !== 'source') {
         const latestDocument = parseDocument(latestServerYaml);
@@ -204,18 +196,7 @@ export function ConfigPage() {
       const nextMergedYaml =
         activeTab === 'source' ? content : applyVisualChangesToYaml(latestServerYaml);
 
-      // In visual mode, applyVisualChangesToYaml re-serializes YAML via parseDocument → toString,
-      // which may reformat comments/whitespace. Normalize the server YAML through the same pipeline
-      // so the diff only shows actual value changes, not cosmetic reformatting.
-      let diffOriginal = latestServerYaml;
-      if (activeTab !== 'source') {
-        try {
-          const doc = parseDocument(latestServerYaml);
-          diffOriginal = doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 });
-        } catch {
-          /* keep raw on parse failure */
-        }
-      }
+      const diffOriginal = latestServerYaml;
 
       if (diffOriginal === nextMergedYaml) {
         setDirty(false);

@@ -45,6 +45,8 @@ type RequestEventRow = {
 export interface RequestEventsDetailsCardProps {
   usage: unknown;
   loading: boolean;
+  apiKeys: string[];
+  apiKeyAliases: Record<string, string>;
   geminiKeys: GeminiKeyConfig[];
   claudeConfigs: ProviderKeyConfig[];
   codexConfigs: ProviderKeyConfig[];
@@ -68,6 +70,8 @@ const encodeCsv = (value: string | number): string => {
 export function RequestEventsDetailsCard({
   usage,
   loading,
+  apiKeys,
+  apiKeyAliases,
   geminiKeys,
   claudeConfigs,
   codexConfigs,
@@ -113,13 +117,23 @@ export function RequestEventsDetailsCard({
   const sourceInfoMap = useMemo(
     () =>
       buildSourceInfoMap({
+        apiKeys,
+        apiKeyAliases,
         geminiApiKeys: geminiKeys,
         claudeApiKeys: claudeConfigs,
         codexApiKeys: codexConfigs,
         vertexApiKeys: vertexConfigs,
         openaiCompatibility: openaiProviders,
       }),
-    [claudeConfigs, codexConfigs, geminiKeys, openaiProviders, vertexConfigs]
+    [
+      apiKeyAliases,
+      apiKeys,
+      claudeConfigs,
+      codexConfigs,
+      geminiKeys,
+      openaiProviders,
+      vertexConfigs,
+    ]
   );
 
   const rows = useMemo<RequestEventRow[]>(() => {

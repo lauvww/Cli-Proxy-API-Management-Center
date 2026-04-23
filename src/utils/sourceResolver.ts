@@ -1,8 +1,11 @@
 import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types';
 import type { CredentialInfo, SourceInfo } from '@/types/sourceInfo';
 import { buildCandidateUsageSourceIds, normalizeAuthIndex } from '@/utils/usage';
+import { maskApiKey } from '@/utils/format';
 
 export interface SourceInfoMapInput {
+  apiKeys?: string[];
+  apiKeyAliases?: Record<string, string>;
   geminiApiKeys?: GeminiKeyConfig[];
   claudeApiKeys?: ProviderKeyConfig[];
   codexApiKeys?: ProviderKeyConfig[];
@@ -22,6 +25,32 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
     candidates.forEach((sourceId) => registerSource(sourceId, displayName, type));
   };
 
+  const resolveConfiguredDisplayName = (apiKey: string | undefined, fallback: string) => {
+    const normalizedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+    const alias =
+      normalizedApiKey && typeof input.apiKeyAliases?.[normalizedApiKey] === 'string'
+        ? input.apiKeyAliases[normalizedApiKey].trim()
+        : '';
+    if (alias) {
+      return alias;
+    }
+    if (fallback.trim()) {
+      return fallback.trim();
+    }
+    return normalizedApiKey ? maskApiKey(normalizedApiKey) : fallback;
+  };
+
+  (input.apiKeys || []).forEach((apiKey, index) => {
+    const normalizedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (!normalizedApiKey) return;
+    const displayName = resolveConfiguredDisplayName(normalizedApiKey, `API Key #${index + 1}`);
+    registerCandidates(
+      displayName,
+      'api-key',
+      buildCandidateUsageSourceIds({ apiKey: normalizedApiKey })
+    );
+  });
+
   const providers: Array<{
     items: Array<{ apiKey?: string; prefix?: string }>;
     type: string;
@@ -35,7 +64,10 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
 
   providers.forEach(({ items, type, label }) => {
     items.forEach((item, index) => {
-      const displayName = item.prefix?.trim() || `${label} #${index + 1}`;
+      const displayName = resolveConfiguredDisplayName(
+        item.apiKey,
+        item.prefix?.trim() || `${label} #${index + 1}`
+      );
       registerCandidates(
         displayName,
         type,
@@ -46,7 +78,10 @@ export function buildSourceInfoMap(input: SourceInfoMapInput): Map<string, Sourc
 
   // OpenAI 特殊处理：多 apiKeyEntries
   (input.openaiCompatibility || []).forEach((provider, providerIndex) => {
-    const displayName = provider.prefix?.trim() || provider.name || `OpenAI #${providerIndex + 1}`;
+    const displayName = resolveConfiguredDisplayName(
+      provider.apiKeyEntries?.[0]?.apiKey,
+      provider.prefix?.trim() || provider.name || `OpenAI #${providerIndex + 1}`
+    );
     const candidates = new Set<string>();
     buildCandidateUsageSourceIds({ prefix: provider.prefix }).forEach((id) => candidates.add(id));
     (provider.apiKeyEntries || []).forEach((entry) => {

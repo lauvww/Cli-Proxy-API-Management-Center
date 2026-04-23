@@ -6,7 +6,7 @@ A single-file Web UI (React + TypeScript) for operating and troubleshooting the 
 
 **Main Project**: https://github.com/lauvww/CLIProxyAPI  
 **Example URL**: https://remote.router-for.me/  
-**Minimum Required Version**: ≥ 2.0.0 (recommended: match the backend release exactly)
+**Minimum Required Version**: ≥ 2.2.1 (recommended: match the backend release exactly)
 
 Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the service is running.
 
@@ -24,6 +24,15 @@ Since version 6.0.19, the Web UI ships with the main program; access it via `/ma
 
 - This repository is the Web UI only. It talks to the CLI Proxy API **Management API** (`/v0/management`) to read/update config, upload credentials, view logs, and inspect usage.
 - It is **not** a proxy and does not forward traffic.
+
+## Current UI Architecture
+
+- The application is a single-file React/Vite management panel that talks to the backend Management API and selected public endpoints such as `/v1/models`.
+- Transport logic lives in `src/services/api/*`, while shared application state is handled with Zustand stores for auth, config, models, usage, theme, and notifications.
+- `ConfigPage` is source-first. `useVisualConfig` provides the structured visual overlay, while raw YAML editing remains the primary correctness path for complex config edits.
+- `AuthPoolPage`, `AuthFilesPage`, and `UsagePage` share path normalization helpers from `src/utils/authPool.ts` so current pool, viewed pool, and runtime scope semantics stay aligned.
+- `UsagePage` uses `useUsageData()` as its page-level source and derives charts, cards, request rows, and health views through shared helpers in `src/utils/usage.ts`.
+- Model discovery is centralized in `src/stores/useModelsStore.ts`, which supports multi-key fallback and carries backend model-scope metadata so System, Dashboard, and Usage stay consistent.
 
 ## Quick start
 
@@ -138,6 +147,8 @@ The UI language is automatically detected from browser settings and can be manua
 ## Versioning
 
 See [VERSIONING.md](VERSIONING.md). The UI version is managed through the repository `VERSION` file, should stay aligned with `package.json`, and should move in lockstep with the backend fork major version.
+
+Architecture details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Security notes
 
