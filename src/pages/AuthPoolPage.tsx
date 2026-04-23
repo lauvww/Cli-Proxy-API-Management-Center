@@ -1015,22 +1015,9 @@ export function AuthPoolPage() {
                         <span className={`${styles.badge} ${styles.badgeActive}`}>
                           {t('auth_pool.single_active_badge')}
                         </span>
-                        {!isViewingCurrent && viewedDisplayPath ? (
-                          <span className={`${styles.badge} ${styles.badgeViewed}`}>
-                            {t('auth_pool.viewing_badge')}
-                          </span>
-                        ) : null}
                       </div>
                     </div>
                     <div className={styles.help}>{t('auth_pool.single_active_notice')}</div>
-                    {!isViewingCurrent && viewedDisplayPath ? (
-                      <div className={styles.info}>
-                        {t('auth_pool.view_mode_notice', {
-                          active: currentDisplayPath || t('common.not_set'),
-                          viewed: viewedDisplayPath,
-                        })}
-                      </div>
-                    ) : null}
                   </div>
 
                   <div className={styles.addRow}>
@@ -1079,11 +1066,6 @@ export function AuthPoolPage() {
                                         'config_management.visual.sections.network.strategy_round_robin'
                                       )}
                                 </span>
-                                {item.isViewed ? (
-                                  <span className={`${styles.badge} ${styles.badgeViewed}`}>
-                                    {t('auth_pool.viewing_badge')}
-                                  </span>
-                                ) : null}
                               </div>
                             </div>
                             <div className={styles.rowActions}>
@@ -1131,26 +1113,12 @@ export function AuthPoolPage() {
             </div>
 
             <div className={styles.stack}>
-              <Card
-                title={
-                  isViewingCurrent ? t('auth_pool.current_strategy') : t('auth_pool.view_strategy')
-                }
-              >
+              <Card title={t('auth_pool.current_strategy')}>
                 <div className={styles.cardSection}>
                   <div className={styles.summaryRow}>
                     <div className={styles.summaryCopy}>
-                      <div className={styles.label}>
-                        {isViewingCurrent
-                          ? t('auth_pool.current_strategy')
-                          : t('auth_pool.view_strategy')}
-                      </div>
-                      <div className={styles.help}>
-                        {isViewingCurrent
-                          ? t('auth_pool.current_strategy_help')
-                          : t('auth_pool.view_strategy_help', {
-                              path: viewedDisplayPath || t('common.not_set'),
-                            })}
-                      </div>
+                      <div className={styles.label}>{t('auth_pool.current_strategy')}</div>
+                      <div className={styles.help}>{t('auth_pool.current_strategy_help')}</div>
                     </div>
                   </div>
                   <Select
@@ -1169,17 +1137,9 @@ export function AuthPoolPage() {
                 <div className={styles.cardSection}>
                   <div className={styles.statusGrid}>
                     <div className={styles.statusTile}>
-                      <div className={styles.statusLabel}>{t('auth_pool.viewing_pool_name')}</div>
+                      <div className={styles.statusLabel}>{t('auth_pool.current_pool_name')}</div>
                       <div className={styles.statusValue}>
                         {viewedPoolName || t('common.not_set')}
-                      </div>
-                    </div>
-                    <div className={styles.statusTile}>
-                      <div className={styles.statusLabel}>{t('auth_pool.view_mode_status')}</div>
-                      <div className={styles.statusValue}>
-                        {isViewingCurrent
-                          ? t('auth_pool.current_in_use')
-                          : t('auth_pool.viewing_only')}
                       </div>
                     </div>
                     <div className={styles.statusTile}>
@@ -1226,12 +1186,7 @@ export function AuthPoolPage() {
           >
             <div className={styles.cardSection}>
               {!isViewingCurrent && viewedDisplayPath ? (
-                <div className={styles.info}>
-                  {t('auth_pool.view_mode_files_notice', {
-                    viewed: viewedDisplayPath,
-                    active: currentDisplayPath || t('common.not_set'),
-                  })}
-                </div>
+                <div className={styles.help}>{viewedDisplayPath}</div>
               ) : null}
               <div className={styles.searchRow}>
                 <Input

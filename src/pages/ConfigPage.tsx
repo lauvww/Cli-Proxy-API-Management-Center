@@ -139,13 +139,12 @@ export function ConfigPage() {
       const commercialModeChanged = previousCommercialMode !== nextCommercialMode;
 
       await configFileApi.saveConfigYaml(mergedYaml);
-      const latestContent = await configFileApi.fetchConfigYaml();
       setDirty(false);
       setDiffModalOpen(false);
-      setContent(latestContent);
-      setServerYaml(latestContent);
-      setMergedYaml(latestContent);
-      loadVisualValuesFromYaml(latestContent);
+      setContent(mergedYaml);
+      setServerYaml(mergedYaml);
+      setMergedYaml(mergedYaml);
+      loadVisualValuesFromYaml(mergedYaml);
 
       // Keep the global config store in sync so sidebar / other pages reflect YAML changes immediately.
       useConfigStore.getState().clearCache();

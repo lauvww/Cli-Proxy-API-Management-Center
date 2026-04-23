@@ -207,11 +207,20 @@ export function SystemPage() {
   };
 
   const modelsScopeHint =
-    modelsScopeMode === 'global-registry-view'
-      ? t('system_info.models_scope_global', {
-          defaultValue: 'Models are shown from the global registry view in multi auth-pool mode.',
+    modelsScopeMode === 'active-auth-pool-view'
+      ? t('system_info.models_scope_active_pool', {
+          defaultValue:
+            'Models reflect the current active auth-pool runtime view, not a per-key exclusive list.',
         })
-      : '';
+      : modelsScopeMode === 'auth-dir-view'
+        ? t('system_info.models_scope_auth_dir', {
+            defaultValue: 'Models reflect the current runtime auth-dir view.',
+          })
+        : modelsScopeMode === 'global-registry-view'
+          ? t('system_info.models_scope_global', {
+              defaultValue: 'Models are shown from the global registry view.',
+            })
+          : '';
 
   const handleClearLoginStorage = () => {
     showConfirmation({

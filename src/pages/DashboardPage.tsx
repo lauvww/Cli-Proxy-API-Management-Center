@@ -583,11 +583,19 @@ export function DashboardPage() {
       path: '/system',
       loading: modelsLoading,
       sublabel:
-        modelsScopeMode === 'global-registry-view'
-          ? t('dashboard.available_models_scope_global', {
-              defaultValue: 'Global registry view',
+        modelsScopeMode === 'active-auth-pool-view'
+          ? t('dashboard.available_models_scope_active_pool', {
+              defaultValue: 'Current active auth-pool view',
             })
-          : t('dashboard.available_models_desc'),
+          : modelsScopeMode === 'auth-dir-view'
+            ? t('dashboard.available_models_scope_auth_dir', {
+                defaultValue: 'Current runtime auth-dir view',
+              })
+            : modelsScopeMode === 'global-registry-view'
+              ? t('dashboard.available_models_scope_global', {
+                  defaultValue: 'Global registry view',
+                })
+              : t('dashboard.available_models_desc'),
     },
   ];
 
